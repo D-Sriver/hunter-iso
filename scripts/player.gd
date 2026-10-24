@@ -19,7 +19,8 @@ const ISO_YAW := PI / 4.0
 const BODY_COLOR := Color(0.15, 0.9, 1.0)
 const MODEL := "hunter_kaz"
 
-var health := MAX_HEALTH
+var max_health := MAX_HEALTH + Implants.bonus_health()
+var health := max_health
 var is_dead := false
 var is_carrying := false
 var facing := Vector3(0, 0, 1)
@@ -54,7 +55,7 @@ func _physics_process(delta: float) -> void:
 
 	if Input.is_action_just_pressed(&"dash") and _dash_cooldown <= 0.0:
 		_dash_timer = DASH_TIME
-		_dash_cooldown = DASH_COOLDOWN
+		_dash_cooldown = DASH_COOLDOWN * Implants.dash_cooldown_factor()
 		_dash_direction = facing
 		_animator.trigger(&"dash")
 
@@ -64,12 +65,20 @@ func _physics_process(delta: float) -> void:
 	if _dash_timer > 0.0:
 		velocity = _dash_direction * DASH_SPEED
 	else:
-		var speed := SPEED * (CARRY_SPEED_FACTOR if is_carrying else 1.0)
+		var speed := SPEED * Implants.speed_factor() * (CARRY_SPEED_FACTOR if is_carrying else 1.0)
 		velocity = direction * speed
 	move_and_slide()
 	position.y = 0.0
 	rotation.y = atan2(facing.x, facing.z)
 	_animator.update(delta, Vector2(velocity.x, velocity.z).length())
+
+
+## Fige le hunter (dialogue, boutique) ou lui rend la main.
+func set_controls_enabled(enabled: bool) -> void:
+	set_physics_process(enabled)
+	if not enabled:
+		velocity = Vector3.ZERO
+		_animator.update(0.0, 0.0)
 
 
 ## Retourne true si le coup porte. Le dash et l'invulnérabilité après un coup protègent.

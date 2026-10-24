@@ -8,7 +8,7 @@ config_version=5
 
 config/name="True Hunter"
 config/description="Roguelite d'action isométrique : vole la relique, échappe-toi des hunters rivaux."
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/hub.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 
 [display]
