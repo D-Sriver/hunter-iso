@@ -1,14 +1,12 @@
 class_name Main
 extends Node3D
-## Orchestre une run : génère le labyrinthe, place les acteurs, gère la relique, les coffres,
+## Orchestre une run : génère le niveau, place les acteurs, gère la relique, les coffres,
 ## l'alerte et la fin de run.
 
 enum RunState { PLAYING, WON, LOST }
 
 const TILE_SIZE := 2.0
-const MAZE_CELLS := Vector2i(11, 11)
-const LOOP_CHANCE := 0.12
-const ROOM_COUNT := 3
+const LEVEL_SLOTS := Vector2i(4, 4)
 const CHEST_COUNT := 6
 const CHEST_LOOT_MIN := 20
 const CHEST_LOOT_MAX := 60
@@ -25,13 +23,16 @@ const ATTACK_STUN_TIME := 2.5
 const STEAL_STUN_TIME := 1.5
 const ALERT_DURATION := 3.5
 const RIVAL_SPAWN_MIN_RATIO := 0.4
+## Hauteur des yeux pour les lignes de vue : les caisses et les tables basses ne cachent pas,
+## les baies serveur et les piliers si.
+const EYE_HEIGHT := Vector3(0.0, 1.3, 0.0)
 const CAMERA_OFFSET := Vector3(15.0, 15.0, 15.0)
 const CAMERA_SIZE := 16.0
 const CAMERA_FOLLOW_SPEED := 6.0
 const RELIC_COLOR := Color(0.3, 1.0, 1.0)
 const BEACON_COLOR := Color(1.0, 0.25, 0.35)
 
-var maze: MazeGenerator
+var level: LevelGenerator
 var player: Player
 var rivals: Array[Rival] = []
 var relic: Node3D
@@ -54,10 +55,10 @@ var _chest_progress := 0.0
 
 func _ready() -> void:
 	InputSetup.ensure_actions()
-	maze = MazeGenerator.new(MAZE_CELLS.x, MAZE_CELLS.y, randi())
-	maze.generate(LOOP_CHANCE, ROOM_COUNT)
+	level = LevelGenerator.new(LEVEL_SLOTS, randi())
+	level.generate()
 	_setup_pathfinding()
-	LevelBuilder.build(self, maze, TILE_SIZE)
+	LevelBuilder.build(self, level, TILE_SIZE)
 	_setup_environment()
 	_spawn_player()
 	_spawn_relic()
@@ -120,14 +121,14 @@ func can_see(from: Vector3, to: Vector3, max_range: float) -> bool:
 	if flat_distance(from, to) > max_range:
 		return false
 	var query := PhysicsRayQueryParameters3D.create(
-		from + Vector3.UP, to + Vector3.UP, LevelBuilder.WALL_LAYER
+		from + EYE_HEIGHT, to + EYE_HEIGHT, LevelBuilder.WALL_LAYER
 	)
 	return get_world_3d().direct_space_state.intersect_ray(query).is_empty()
 
 
 func nearest_exit(from: Vector3) -> Vector3:
-	var best := tile_to_world(maze.exit_tiles[0])
-	for tile in maze.exit_tiles:
+	var best := tile_to_world(level.exit_tiles[0])
+	for tile in level.exit_tiles:
 		var exit_position := tile_to_world(tile)
 		if flat_distance(from, exit_position) < flat_distance(from, best):
 			best = exit_position
@@ -139,7 +140,7 @@ func is_on_exit(position_to_check: Vector3) -> bool:
 
 
 func random_floor_position() -> Vector3:
-	return tile_to_world(maze.floor_tiles.pick_random())
+	return tile_to_world(level.floor_tiles.pick_random())
 
 
 func on_rival_escaped(rival: Rival) -> void:
@@ -328,25 +329,25 @@ func _end_run(escaped: bool, title: String) -> void:
 
 
 func _setup_pathfinding() -> void:
-	_astar.region = Rect2i(0, 0, maze.width, maze.height)
+	_astar.region = Rect2i(0, 0, level.width, level.height)
 	_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_NEVER
 	_astar.update()
-	for y in maze.height:
-		for x in maze.width:
+	for y in level.height:
+		for x in level.width:
 			var tile := Vector2i(x, y)
-			if not maze.is_floor(tile):
+			if not level.is_floor(tile):
 				_astar.set_point_solid(tile)
 
 
 func _walkable_tile_near(tile: Vector2i) -> Vector2i:
-	var clamped := Vector2i(clampi(tile.x, 0, maze.width - 1), clampi(tile.y, 0, maze.height - 1))
-	if maze.is_floor(clamped):
+	var clamped := Vector2i(clampi(tile.x, 0, level.width - 1), clampi(tile.y, 0, level.height - 1))
+	if level.is_floor(clamped):
 		return clamped
-	for offset in MazeGenerator.NEIGHBORS_8:
+	for offset in LevelGenerator.NEIGHBORS_8:
 		var neighbor: Vector2i = clamped + offset
-		if maze.is_floor(neighbor):
+		if level.is_floor(neighbor):
 			return neighbor
-	return maze.start_tile
+	return level.start_tile
 
 
 func _setup_environment() -> void:
@@ -376,14 +377,14 @@ func _setup_environment() -> void:
 func _spawn_player() -> void:
 	player = Player.new()
 	add_child(player)
-	player.global_position = tile_to_world(maze.start_tile)
+	player.global_position = tile_to_world(level.start_tile)
 	player.attacked.connect(_on_player_attacked)
 
 
 func _spawn_relic() -> void:
 	relic = Node3D.new()
 	add_child(relic)
-	relic.global_position = tile_to_world(maze.relic_tile) + Vector3(0.0, RELIC_HEIGHT, 0.0)
+	relic.global_position = tile_to_world(level.relic_tile) + Vector3(0.0, RELIC_HEIGHT, 0.0)
 
 	var gem := SphereMesh.new()
 	gem.radius = 0.35
@@ -412,14 +413,18 @@ func _spawn_relic() -> void:
 	add_child(_beacon)
 
 
+## Au plus un coffre par salle, pour pousser à explorer.
 func _spawn_chests() -> void:
-	var excluded: Array[Vector2i] = [maze.start_tile, maze.relic_tile]
-	excluded.append_array(maze.exit_tiles)
-	var spots := maze.dead_end_tiles().filter(
-		func(tile: Vector2i) -> bool: return not excluded.has(tile)
-	)
+	var spots := level.chest_spots.duplicate()
 	spots.shuffle()
-	for tile in spots.slice(0, CHEST_COUNT):
+	var rooms_with_chest := []
+	for tile: Vector2i in spots:
+		if _chests.size() >= CHEST_COUNT:
+			break
+		var room := level.room_at(tile)
+		if rooms_with_chest.has(room):
+			continue
+		rooms_with_chest.append(room)
 		var chest := Chest.new()
 		chest.setup(randi_range(CHEST_LOOT_MIN, CHEST_LOOT_MAX))
 		add_child(chest)
@@ -428,22 +433,18 @@ func _spawn_chests() -> void:
 
 
 func _decorate() -> void:
-	var reserved: Array[Vector2i] = [maze.start_tile, maze.relic_tile]
-	reserved.append_array(maze.exit_tiles)
-	for chest in _chests:
-		reserved.append(world_to_tile(chest.global_position))
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
-	Decor.build(self, maze, TILE_SIZE, reserved, rng)
+	Decor.build(self, level, TILE_SIZE, rng)
 
 
 func _spawn_rivals() -> void:
-	var distances := maze.distances_from(maze.start_tile)
-	var max_distance: int = distances[maze.relic_tile]
+	var distances := level.distances_from(level.start_tile)
+	var max_distance: int = distances[level.relic_tile]
 	var spots: Array[Vector2i] = []
-	for tile in maze.floor_tiles:
+	for tile in level.floor_tiles:
 		var tile_distance: int = distances.get(tile, 0)
-		if tile_distance >= max_distance * RIVAL_SPAWN_MIN_RATIO and tile != maze.relic_tile:
+		if tile_distance >= max_distance * RIVAL_SPAWN_MIN_RATIO and tile != level.relic_tile:
 			spots.append(tile)
 	spots.shuffle()
 	var kinds := [

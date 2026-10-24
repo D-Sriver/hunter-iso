@@ -13,7 +13,7 @@ const ATTACK_COOLDOWN := 0.45
 const SLASH_TIME := 0.12
 const MAX_HEALTH := 3
 const INVULNERABLE_TIME := 1.2
-## La caméra regarde le labyrinthe en diagonale : on tourne l'entrée de 45° pour que « haut »
+## La caméra regarde le niveau en diagonale : on tourne l'entrée de 45° pour que « haut »
 ## parte vers le haut de l'écran.
 const ISO_YAW := PI / 4.0
 const BODY_COLOR := Color(0.15, 0.9, 1.0)

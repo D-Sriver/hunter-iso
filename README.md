@@ -1,7 +1,7 @@
 # Hunter Iso
 
 Roguelite d'action en 3D isométrique, dans un Néo-Tokyo cyberpunk façon anime des années 90.
-Tu plonges dans un labyrinthe généré au hasard pour voler une relique, puis tu dois t'enfuir
+Tu plonges dans un complexe généré au hasard pour voler une relique, puis tu dois t'enfuir
 pendant que les hunters rivaux te traquent.
 
 - Moteur : [Godot 4](https://godotengine.org/) (GDScript)
@@ -14,7 +14,7 @@ pendant que les hunters rivaux te traquent.
 2. Dans Godot, clique sur **Importer**, choisis le fichier `project.godot` de ce dossier.
 3. Appuie sur **F5** (ou le bouton ▶ en haut à droite).
 
-Chaque lancement, et chaque appui sur **R**, génère un nouveau labyrinthe.
+Chaque lancement, et chaque appui sur **R**, génère un nouveau niveau.
 
 ## Contrôles
 
@@ -28,8 +28,16 @@ Chaque lancement, et chaque appui sur **R**, génère un nouveau labyrinthe.
 
 ## Ce que contient le prototype
 
-- **Labyrinthe généré** : couloirs, quelques boucles et salles, 3 sorties sur les bords.
-- **Relique** au point le plus éloigné du départ. La prendre déclenche une **alerte générale** :
+- **Niveau en salles** : 16 salles sur une grille 4×4, reliées par des couloirs courts, avec
+  quelques boucles. Chaque salle a un rôle et son mobilier :
+  - **quai d'arrivée** : le point de départ, avec une sortie ;
+  - **chambre forte** : la salle la plus éloignée du départ, qui abrite la relique ;
+  - **salle serveurs** : des rangées de baies qui cachent la vue ;
+  - **laboratoire** : des paillasses basses au centre ;
+  - **entrepôt** : des caisses en vrac ;
+  - **bureaux** : des postes contre les murs.
+- **3 sorties** : une au quai d'arrivée, deux dans des salles éloignées de la chambre forte.
+- **Relique** au centre de la chambre forte. La prendre déclenche une **alerte générale** :
   tout le monde est prévenu et un faisceau rouge révèle le porteur.
 - **3 rivaux** qui cherchent eux aussi la relique, chacun avec sa réaction à l'alerte :
   - le **Traqueur** fonce sur le porteur ;
@@ -37,7 +45,7 @@ Chaque lancement, et chaque appui sur **R**, génère un nouveau labyrinthe.
   - l'**Opportuniste** suit de loin et frappe quand tu es à 1 PV.
 - **Combat minimal** : un rival qui te touche retire 1 PV (3 PV au total) et te vole la relique.
   Frappe un rival pour l'étourdir : s'il porte la relique, elle tombe.
-- **Coffres** dans les culs-de-sac : maintenir E pour les ouvrir, ça fait du bruit et attire les rivaux.
+- **Coffres**, au plus un par salle : maintenir E pour les ouvrir, ça fait du bruit et attire les rivaux.
 - **Fin de run** : sortie avec la relique (butin + 150 ¢), fuite sans la relique (butin seul) ou
   mort (rien). Les crédits sont sauvegardés entre les runs.
 
@@ -49,7 +57,7 @@ des shaders. Les personnages et les objets restent des formes simples en attenda
 ```
 scenes/main.tscn          scène unique, tout est construit par code
 scripts/main.gd           orchestration de la run (relique, alerte, coffres, sorties, fin)
-scripts/maze_generator.gd génération du labyrinthe sur grille
+scripts/level_generator.gd génération du niveau : salles, couloirs, mobilier
 scripts/level_builder.gd  sol, murs néon et sorties
 scripts/player.gd         déplacement iso, dash, attaque
 scripts/rival.gd          IA des rivaux et personnalités
@@ -58,6 +66,6 @@ scripts/hud.gd            interface
 scripts/input_setup.gd    touches et manette
 scripts/save_data.gd      crédits conservés entre les runs
 scripts/materials.gd      matériaux des placeholders
-scripts/decor.gd          enseignes néon, caisses et terminaux
+scripts/decor.gd          enseignes néon et mobilier des salles
 shaders/                  murs, sol à circuits, néons, coupe des murs côté caméra
 ```
