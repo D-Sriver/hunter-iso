@@ -3,6 +3,7 @@
 Depuis la racine du dépôt :
     blender --background --python blender/kit.py
     blender --background --python blender/kit.py -- --preview   (rend aussi une salle d'exemple)
+    blender --background --python blender/kit.py -- --lineup    (rend les six hunters)
 
 Conventions (repère Blender, Z vers le haut) :
 - une tuile fait 2 m ; les sols sont centrés sur l'origine, dessus à z = 0 ;
@@ -101,10 +102,7 @@ def build_materials():
     material("trim_light", color=(0.55, 0.58, 0.85), metallic=0.3, roughness=0.5)
     material("copper", color=(0.85, 0.4, 0.15), metallic=0.6, roughness=0.35)
     material("rubber", color=(0.05, 0.04, 0.1), metallic=0.0, roughness=0.8)
-    material("skin", color=(0.95, 0.72, 0.6), metallic=0.0, roughness=0.6)
-    for name, color in (("coat_red", (0.8, 0.1, 0.12)), ("coat_purple", (0.4, 0.15, 0.6)),
-                        ("coat_mustard", (0.85, 0.6, 0.12))):
-        material(name, color=color, metallic=0.0, roughness=0.5)
+    material("skin", color=(0.88, 0.6, 0.48), metallic=0.0, roughness=0.6)
     material("floor_tiles", metallic=0.1, roughness=0.3,
              texture=image_from_array("floor_tiles", textures.floor_tiles()))
     material("grating", metallic=0.3, roughness=0.5,
@@ -146,8 +144,10 @@ def project_uv(bm, mode, scale):
             loop[uv_layer].uv = uv
 
 
-def finish(bm, mat, uv="world", uv_scale=2.0):
+def finish(bm, mat, uv="world", uv_scale=2.0, smooth=False):
     project_uv(bm, uv, uv_scale)
+    for face in bm.faces:
+        face.smooth = smooth
     mesh = bpy.data.meshes.new("part")
     bm.to_mesh(mesh)
     bm.free()
@@ -481,33 +481,269 @@ def barrel():
 
 
 # --- Hunters ------------------------------------------------------------------------------------
+# Personnages façon anime 90's : grandes silhouettes lisibles en vue iso, manteaux et coiffures
+# typés, une arme par hunter. Pose en A (bras légèrement écartés) pour le rig à venir.
 
-def hunter(name, accent, coat):
-    """Hunter stylisé, environ 1,75 m : long manteau, épaulettes, visière lumineuse.
-    L'avant regarde vers -Y."""
-    parts = [
-        box((0.16, 0.18, 0.8), (-0.12, 0, 0.4), "rubber", bevel=0.02),
-        box((0.16, 0.18, 0.8), (0.12, 0, 0.4), "rubber", bevel=0.02),
-        box((0.2, 0.26, 0.1), (-0.12, -0.03, 0.05), coat, bevel=0.02),
-        box((0.2, 0.26, 0.1), (0.12, -0.03, 0.05), coat, bevel=0.02),
-        # Pan du manteau : plus large en bas.
-        cylinder(0.3, 0.6, (0, 0.02, 0.62), coat, segments=8, top_radius=0.22),
-        box((0.46, 0.28, 0.55), (0, 0, 1.18), coat, bevel=0.04),
-        box((0.2, 0.3, 0.12), (-0.3, 0, 1.42), "trim_light", bevel=0.03),
-        box((0.2, 0.3, 0.12), (0.3, 0, 1.42), "trim_light", bevel=0.03),
-        box((0.12, 0.14, 0.55), (-0.31, 0, 1.1), coat, bevel=0.02),
-        box((0.12, 0.14, 0.55), (0.31, 0, 1.1), coat, bevel=0.02),
-        box((0.1, 0.12, 0.12), (-0.31, -0.02, 0.78), "rubber"),
-        box((0.1, 0.12, 0.12), (0.31, -0.02, 0.78), "rubber"),
-        box((0.12, 0.12, 0.1), (0, 0, 1.5), "rubber"),
-        box((0.24, 0.26, 0.26), (0, 0, 1.66), "skin", bevel=0.05),
-        box((0.28, 0.3, 0.12), (0, 0.02, 1.8), "rubber", bevel=0.04),
-        box((0.28, 0.04, 0.07), (0, -0.14, 1.68), accent),
-        box((0.46, 0.02, 0.04), (0, -0.145, 1.25), accent),
-        box((0.04, 0.29, 0.04), (-0.25, 0, 1.47), accent),
-        box((0.04, 0.29, 0.04), (0.25, 0, 1.47), accent),
+HUNTERS = [
+    {"name": "hunter_kaz", "body": "male", "outfit": "trench", "coat": (0.8, 0.1, 0.12),
+     "pants": (0.08, 0.07, 0.16), "hair": "spiky", "hair_color": (0.06, 0.05, 0.1),
+     "accent": "neon_teal", "weapon": "sword"},
+    {"name": "hunter_rook", "body": "big", "outfit": "armor", "coat": (0.85, 0.6, 0.12),
+     "pants": (0.15, 0.13, 0.22), "hair": "buzz", "hair_color": (0.35, 0.18, 0.08),
+     "accent": "neon_gold", "weapon": "hammer"},
+    {"name": "hunter_vex", "body": "male", "outfit": "trench", "coat": (0.4, 0.15, 0.6),
+     "pants": (0.06, 0.05, 0.12), "hair": "swept", "hair_color": (0.9, 0.9, 0.95),
+     "accent": "neon_pink", "weapon": "rifle"},
+    {"name": "hunter_nova", "body": "female", "outfit": "bomber", "coat": (0.78, 0.8, 0.9),
+     "pants": (0.1, 0.12, 0.3), "hair": "bob", "hair_color": (1.0, 0.3, 0.6),
+     "accent": "neon_teal", "weapon": "pistols"},
+    {"name": "hunter_sable", "body": "female", "outfit": "trench", "coat": (0.08, 0.3, 0.25),
+     "pants": (0.05, 0.05, 0.1), "hair": "ponytail", "hair_color": (0.05, 0.04, 0.08),
+     "accent": "neon_gold", "weapon": "scythe"},
+    {"name": "hunter_mika", "body": "female", "outfit": "bomber", "coat": (0.95, 0.75, 0.1),
+     "pants": (0.06, 0.06, 0.14), "hair": "twintails", "hair_color": (0.2, 0.45, 1.0),
+     "accent": "neon_pink", "weapon": "blades"},
+]
+
+
+def paint(name, color):
+    """Matériau mat à couleur unie, créé à la demande."""
+    if name not in MATERIALS:
+        material(name, color=color, metallic=0.0, roughness=0.55)
+    return name
+
+
+def sphere(size, center, mat, rotation=(0.0, 0.0, 0.0), segments=14):
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=segments * 2 // 3, radius=0.5)
+    bmesh.ops.scale(bm, vec=Vector(size), verts=bm.verts)
+    transform(bm, center, rotation)
+    return finish(bm, mat, "world", 1.0, smooth=True)
+
+
+def limb(start, end, radius_start, radius_end, mat, segments=10, flatten=1.0, caps=True):
+    """Tronc de cône lisse tendu entre deux points ; `flatten` écrase la section en profondeur."""
+    start, end = Vector(start), Vector(end)
+    axis = end - start
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=caps, cap_tris=False, segments=segments,
+                          radius1=radius_start, radius2=radius_end, depth=axis.length)
+    bmesh.ops.scale(bm, vec=Vector((1.0, flatten, 1.0)), verts=bm.verts)
+    rotation = axis.to_track_quat("Z", "Y").to_matrix().to_4x4()
+    bmesh.ops.transform(bm, matrix=rotation, verts=bm.verts)
+    bmesh.ops.translate(bm, vec=(start + end) / 2, verts=bm.verts)
+    return finish(bm, mat, "world", 1.0, smooth=True)
+
+
+def hunter(spec):
+    """Assemble un hunter d'environ 1,75 m (1,85 m pour le costaud). L'avant regarde vers -Y."""
+    body = spec["body"]
+    female = body == "female"
+    big = body == "big"
+    name = spec["name"]
+    coat = paint(name + "_coat", spec["coat"])
+    pants = paint(name + "_pants", spec["pants"])
+    hair = paint(name + "_hair", spec["hair_color"])
+    accent = spec["accent"]
+
+    shoulder = 0.27 if big else 0.2 if female else 0.23
+    waist = 0.15 if big else 0.1 if female else 0.12
+    chest = 0.23 if big else 0.15 if female else 0.18
+    leg_x = 0.11 if big else 0.09
+
+    parts = []
+    # Jambes et bottes.
+    for side in (-1, 1):
+        x = side * leg_x
+        parts += [
+            limb((x, 0, 0.92), (x, 0, 0.5), 0.09 if big else 0.08, 0.065, pants),
+            sphere((0.13, 0.13, 0.13), (x, 0, 0.5), pants),
+            limb((x, 0, 0.5), (x, 0, 0.14), 0.065, 0.055, pants),
+            limb((x, 0, 0.32), (x, 0, 0.04), 0.068, 0.072, "rubber"),
+            box((0.12, 0.2, 0.08), (x, -0.04, 0.04), "rubber", bevel=0.025),
+        ]
+    parts.append(sphere((2 * leg_x + 0.17, 0.2, 0.2), (0, 0, 0.95), pants))
+
+    # Torse, cou, tête.
+    parts += [
+        limb((0, 0, 0.92), (0, 0, 1.42), waist, chest, pants, flatten=0.7),
+        limb((0, 0, 1.4), (0, 0, 1.54), 0.045, 0.045, "skin"),
+        sphere((0.22, 0.23, 0.26), (0, 0, 1.65), "skin"),
+        sphere((0.13, 0.12, 0.1), (0, -0.045, 1.55), "skin"),
     ]
-    return join(name, parts)
+    # Grands yeux d'anime : un ovale sombre et un reflet clair.
+    for side in (-1, 1):
+        parts += [
+            sphere((0.032, 0.02, 0.046), (side * 0.048, -0.102, 1.64), paint("eye", (0.08, 0.05, 0.2))),
+            sphere((0.015, 0.01, 0.015), (side * 0.045, -0.111, 1.66), "trim_light"),
+        ]
+    if female:
+        parts.append(sphere((0.24, 0.13, 0.11), (0, -0.07, 1.27), coat))
+
+    # Bras en pose A, manches de la couleur du manteau, gants.
+    for side in (-1, 1):
+        s = (side * shoulder, 0, 1.38)
+        e = (side * (shoulder + 0.07), 0.01, 1.1)
+        h = (side * (shoulder + 0.1), -0.02, 0.86)
+        parts += [
+            sphere((0.15, 0.15, 0.15), s, coat),
+            limb(s, e, 0.06 if big else 0.052, 0.045, coat),
+            sphere((0.1, 0.1, 0.1), e, coat),
+            limb(e, h, 0.045, 0.04, coat),
+            sphere((0.1, 0.11, 0.12), h, "rubber"),
+        ]
+
+    parts += outfit(spec["outfit"], coat, accent, waist, chest, shoulder)
+    parts += hairstyle(spec["hair"], hair)
+    parts += weapon(spec["weapon"], accent, shoulder + 0.1)
+
+    obj = join(name, parts)
+    if big:
+        obj.scale = (1.06, 1.06, 1.06)
+    elif female:
+        obj.scale = (0.97, 0.97, 0.97)
+    return obj
+
+
+def outfit(style, coat, accent, waist, chest, shoulder):
+    parts = [limb((0, 0, 0.93), (0, 0, 0.97), waist + 0.025, waist + 0.025, accent, segments=16,
+                  flatten=0.72)]
+    if style == "trench":
+        parts += [
+            limb((0, 0, 0.98), (0, 0, 1.43), waist + 0.02, chest + 0.02, coat, flatten=0.72),
+            # Pans du manteau, ouverts en bas, qui descendent sous le genou.
+            limb((0, 0.01, 1.0), (0, 0.04, 0.4), waist + 0.04, 0.3, coat, segments=12,
+                 flatten=0.75, caps=False),
+            limb((0, 0.04, 0.42), (0, 0.04, 0.4), 0.305, 0.305, accent, segments=12,
+                 flatten=0.76, caps=False),
+            # Col montant.
+            limb((0, 0.03, 1.38), (0, 0.05, 1.52), 0.11, 0.14, coat, segments=12, caps=False),
+        ]
+    elif style == "bomber":
+        parts += [
+            limb((0, 0, 0.9), (0, 0, 1.44), waist + 0.05, chest + 0.04, coat, flatten=0.75),
+            limb((0, 0, 0.88), (0, 0, 0.94), waist + 0.055, waist + 0.055, "rubber",
+                 flatten=0.76),
+            sphere((0.3, 0.24, 0.12), (0, 0.02, 1.45), coat),
+            box((0.02, 0.01, 0.4), (0, -(chest + 0.04) * 0.75 - 0.01, 1.15), accent),
+        ]
+    else:
+        parts += [
+            limb((0, 0, 0.98), (0, 0, 1.44), waist + 0.03, chest + 0.03, "metal_dark",
+                 flatten=0.75),
+            box((0.42, 0.12, 0.34), (0, -0.14, 1.24), coat, bevel=0.04),
+            box((0.2, 0.01, 0.03), (0, -0.205, 1.3), accent),
+            limb((0, 0, 0.96), (0, 0.02, 0.6), waist + 0.05, 0.26, coat, segments=8,
+                 flatten=0.8, caps=False),
+        ]
+    # Épaulettes surdimensionnées : la signature des héros d'anime de l'époque.
+    pad = 0.24 if style == "armor" else 0.17
+    for side in (-1, 1):
+        parts.append(box((pad, pad + 0.04, 0.09), (side * (shoulder + 0.02), 0, 1.46),
+                         coat if style != "trench" else "trim_light", bevel=0.03,
+                         rotation=(0, side * -0.3, 0)))
+        parts.append(box((0.03, pad + 0.05, 0.02), (side * (shoulder + 0.09), 0, 1.44), accent,
+                         rotation=(0, side * -0.3, 0)))
+    return parts
+
+
+def spike(base, tip, radius, mat):
+    return limb(base, tip, radius, 0.004, mat, segments=6)
+
+
+def hairstyle(style, hair):
+    top = 1.67
+    if style == "buzz":
+        return [sphere((0.215, 0.225, 0.17), (0, 0.01, top + 0.04), hair)]
+    if style == "bob":
+        return [
+            sphere((0.27, 0.27, 0.26), (0, 0.04, top + 0.02), hair),
+            box((0.21, 0.05, 0.07), (0, -0.095, top + 0.07), hair, bevel=0.02),
+        ]
+    parts = [sphere((0.24, 0.25, 0.21), (0, 0.01, top + 0.04), hair)]
+    # Frange en mèches pointues : c'est elle qui donne la tête "anime".
+    for x in (-0.07, 0.0, 0.07):
+        parts.append(spike((x, -0.06, top + 0.11), (x * 1.3, -0.125, top + 0.0), 0.045, hair))
+    if style == "spiky":
+        for tip in ((0, -0.12, 1.83), (0.12, -0.05, 1.86), (-0.12, -0.05, 1.86),
+                    (0.06, 0.12, 1.9), (-0.06, 0.12, 1.9), (0.18, 0.1, 1.74),
+                    (-0.18, 0.1, 1.74), (0, 0.2, 1.72), (0.1, -0.13, 1.66), (-0.1, -0.13, 1.66)):
+            parts.append(spike((tip[0] * 0.3, tip[1] * 0.3, top + 0.06), tip, 0.06, hair))
+    elif style == "swept":
+        for x in (-0.09, -0.03, 0.03, 0.09):
+            parts.append(spike((x, -0.08, top + 0.1), (x * 1.6, 0.24, top - 0.06), 0.055, hair))
+        parts.append(spike((0.05, -0.1, top + 0.08), (0.11, -0.13, top - 0.08), 0.035, hair))
+    elif style == "ponytail":
+        parts += [
+            sphere((0.08, 0.08, 0.08), (0, 0.11, top + 0.08), "rubber"),
+            limb((0, 0.12, top + 0.08), (0, 0.22, top - 0.15), 0.06, 0.05, hair),
+            limb((0, 0.22, top - 0.15), (0, 0.24, top - 0.55), 0.05, 0.01, hair),
+            box((0.2, 0.05, 0.06), (0, -0.1, top + 0.08), hair, bevel=0.02),
+        ]
+    elif style == "twintails":
+        parts.append(box((0.21, 0.05, 0.07), (0, -0.1, top + 0.08), hair, bevel=0.02))
+        for side in (-1, 1):
+            base = (side * 0.12, 0.04, top + 0.08)
+            middle = (side * 0.22, 0.07, top - 0.1)
+            parts += [
+                sphere((0.06, 0.06, 0.06), base, "neon_pink"),
+                limb(base, middle, 0.05, 0.055, hair),
+                limb(middle, (side * 0.24, 0.1, top - 0.5), 0.055, 0.01, hair),
+            ]
+    return parts
+
+
+def weapon(kind, accent, hand_x):
+    hand = Vector((hand_x, -0.02, 0.86))
+    if kind == "sword":
+        # Épée vibrante portée dans le dos, en diagonale.
+        return [
+            box((0.05, 0.015, 0.95), (0.02, 0.2, 1.1), "trim_light", rotation=(0, 0.55, 0)),
+            box((0.014, 0.022, 0.9), (0.035, 0.2, 1.1), accent, rotation=(0, 0.55, 0)),
+            limb((-0.28, 0.2, 1.52), (-0.2, 0.2, 1.4), 0.025, 0.025, "rubber"),
+            box((0.16, 0.04, 0.03), (-0.19, 0.2, 1.4), "metal_dark", rotation=(0, 0.55, 0)),
+        ]
+    if kind == "hammer":
+        head = Vector((hand_x + 0.06, -0.24, 0.14))
+        return [
+            limb(hand + Vector((0, 0, 0.08)), head, 0.025, 0.025, "metal_dark"),
+            box((0.24, 0.34, 0.24), head, "metal_dark", bevel=0.03, rotation=(0.3, 0, 0)),
+            box((0.25, 0.02, 0.06), head + Vector((0, -0.17, 0.05)), accent, rotation=(0.3, 0, 0)),
+        ]
+    if kind == "rifle":
+        center = hand + Vector((0.02, -0.04, -0.22))
+        return [
+            box((0.06, 0.12, 0.62), center, "metal_dark", bevel=0.01),
+            box((0.07, 0.08, 0.16), center + Vector((0, 0.02, 0.36)), "rubber"),
+            limb(center - Vector((0, 0.02, 0.3)), center - Vector((0, 0.02, 0.55)), 0.018, 0.018,
+                 "metal_dark"),
+            box((0.065, 0.02, 0.4), center + Vector((0, -0.065, 0)), accent),
+        ]
+    if kind == "pistols":
+        parts = []
+        for side in (-1, 1):
+            parts += [
+                box((0.07, 0.16, 0.13), (side * 0.2, -0.02, 0.84), "metal_dark", bevel=0.01),
+                box((0.075, 0.02, 0.1), (side * 0.2, -0.105, 0.84), accent),
+            ]
+        return parts
+    if kind == "scythe":
+        top = Vector((0.3, 0.22, 1.95))
+        return [
+            limb((-0.3, 0.22, 0.45), top, 0.022, 0.022, "metal_dark"),
+            box((0.6, 0.02, 0.1), top + Vector((-0.25, 0, 0.0)), "trim_light",
+                rotation=(0, -0.35, 0)),
+            box((0.6, 0.025, 0.02), top + Vector((-0.25, 0, -0.05)), accent,
+                rotation=(0, -0.35, 0)),
+        ]
+    parts = []
+    for side in (-1, 1):
+        grip = Vector((side * hand_x, -0.03, 0.86))
+        parts += [
+            box((0.04, 0.012, 0.42), grip + Vector((0, -0.02, -0.25)), "trim_light"),
+            box((0.012, 0.02, 0.4), grip + Vector((side * -0.02, -0.02, -0.25)), accent),
+        ]
+    return parts
 
 
 # --- Export et aperçu ---------------------------------------------------------------------------
@@ -533,10 +769,7 @@ def build_kit():
         wall_door(), wall_stub(), wall_post(),
         server_rack(), crate(), crate_stack(), terminal(), desk(), lab_table(), pillar(),
         pedestal(), relic(), exit_pad(), loot_chest(), barrel(),
-        hunter("hunter_player", "neon_teal", "coat_red"),
-        hunter("hunter_rival_purple", "neon_pink", "coat_purple"),
-        hunter("hunter_rival_gold", "neon_gold", "coat_mustard"),
-    ]
+    ] + [hunter(spec) for spec in HUNTERS]
     for piece in pieces:
         export(piece)
     return {piece.name: piece for piece in pieces}
@@ -598,7 +831,7 @@ def toonify(mat):
     links.new(total.outputs[0], output.inputs["Surface"])
 
 
-def add_bloom(path, threshold=0.8, strength=0.9):
+def add_bloom(path, threshold=0.92, strength=0.9):
     """Halo autour des néons, ajouté après le rendu (le compositeur exige un GPU)."""
     import numpy as np
     image = bpy.data.images.load(path)
@@ -653,10 +886,34 @@ def render_preview(kit, path):
     place(kit, "relic", (3.4, 0.6, 1.25), 0.4)
     place(kit, "loot_chest", (0.2, 0.2, 0), 0.5)
     place(kit, "exit_pad", (8.0, 0.0, 0))
-    place(kit, "hunter_player", (6.0, 1.2, 0), math.radians(-150))
-    place(kit, "hunter_rival_purple", (2.4, 4.6, 0), math.radians(30))
+    place(kit, "hunter_kaz", (6.0, 1.2, 0), math.radians(-150))
+    place(kit, "hunter_sable", (2.4, 4.6, 0), math.radians(30))
 
-    # Lumière de cel-shading : une lune lavande franche, des néons colorés en complément.
+    point_light((1.0, 6.0, 2.4), NEON_PINK, 150)
+    point_light((-0.5, 3.0, 2.2), NEON_TEAL, 100)
+    point_light((5.0, 3.0, 2.0), NEON_TEAL, 60)
+    point_light((8.0, 6.0, 2.4), (1.0, 0.55, 0.2), 120)
+    point_light((8.0, 0.0, 1.0), NEON_GREEN, 40)
+    shoot(path, Vector((4.0, 3.0, 0.8)), 15.5, (1280, 1000))
+
+
+def render_lineup(kit, path):
+    """Les six hunters côte à côte, sur un sol de la salle, vus en iso de plus près."""
+    KIT.hide_render = True
+    for x in range(-1, 2):
+        for y in range(-1, 2):
+            place(kit, "floor_room", (x * TILE * 2, y * TILE, 0)).scale = (2, 1, 1)
+    azimuth = math.radians(20)
+    row = Vector((math.cos(azimuth), math.sin(azimuth), 0))
+    for i, spec in enumerate(HUNTERS):
+        place(kit, spec["name"], row * (i - 2.5) * 1.25, azimuth - math.radians(15))
+    point_light((-3.0, -2.0, 2.5), NEON_PINK, 120)
+    point_light((3.0, -2.0, 2.5), NEON_TEAL, 120)
+    shoot(path, Vector((0.0, 0.0, 0.95)), 7.8, (1600, 900), azimuth=20)
+
+
+def shoot(path, target, ortho_scale, resolution, azimuth=45):
+    """Rend la scène en cel-shading : lune lavande, contours sombres, halo sur les néons."""
     sun_data = bpy.data.lights.new("moon", "SUN")
     sun_data.color = (0.85, 0.82, 1.0)
     sun_data.energy = 3.0
@@ -664,11 +921,6 @@ def render_preview(kit, path):
     sun = bpy.data.objects.new("moon", sun_data)
     bpy.context.scene.collection.objects.link(sun)
     sun.rotation_euler = (math.radians(50), 0, math.radians(-30))
-    point_light((1.0, 6.0, 2.4), NEON_PINK, 150)
-    point_light((-0.5, 3.0, 2.2), NEON_TEAL, 100)
-    point_light((5.0, 3.0, 2.0), NEON_TEAL, 60)
-    point_light((8.0, 6.0, 2.4), (1.0, 0.55, 0.2), 120)
-    point_light((8.0, 0.0, 1.0), NEON_GREEN, 40)
 
     for mat in MATERIALS.values():
         toonify(mat)
@@ -684,11 +936,10 @@ def render_preview(kit, path):
 
     camera_data = bpy.data.cameras.new("Camera")
     camera_data.type = "ORTHO"
-    camera_data.ortho_scale = 15.5
+    camera_data.ortho_scale = ortho_scale
     camera = bpy.data.objects.new("Camera", camera_data)
     scene.collection.objects.link(camera)
-    camera.rotation_euler = (math.radians(57), 0, math.radians(45))
-    target = Vector((4.0, 3.0, 0.8))
+    camera.rotation_euler = (math.radians(57), 0, math.radians(azimuth))
     forward = camera.rotation_euler.to_matrix() @ Vector((0, 0, -1))
     camera.location = target - forward * 40
     scene.camera = camera
@@ -696,8 +947,7 @@ def render_preview(kit, path):
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 64
     scene.cycles.use_denoising = True
-    scene.render.resolution_x = 1280
-    scene.render.resolution_y = 1000
+    scene.render.resolution_x, scene.render.resolution_y = resolution
     scene.view_settings.view_transform = "Standard"
     scene.render.use_freestyle = True
     scene.render.line_thickness = 1.3
@@ -719,7 +969,7 @@ def render_preview(kit, path):
             continue
         # Ni sur les sols : chaque tuile tracerait un quadrillage épais.
         glowing = [slot.material is not None and slot.material.name.startswith(
-            ("neon", "screen", "relic", "floor", "grating")) for slot in obj.material_slots]
+            ("neon", "screen", "relic", "floor", "grating", "eye")) for slot in obj.material_slots]
         mesh = obj.data
         marks = mesh.attributes.get("freestyle_face") or mesh.attributes.new(
             "freestyle_face", "BOOLEAN", "FACE")
@@ -733,3 +983,5 @@ if __name__ == "__main__":
     kit_objects = build_kit()
     if "--preview" in sys.argv:
         render_preview(kit_objects, os.path.join(KIT_DIR, "preview.png"))
+    elif "--lineup" in sys.argv:
+        render_lineup(kit_objects, os.path.join(KIT_DIR, "hunters.png"))
