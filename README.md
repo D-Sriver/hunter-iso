@@ -10,7 +10,7 @@ pendant que les hunters rivaux te traquent.
 
 ## Lancer le prototype
 
-1. Installe Godot 4.3 ou plus récent (version standard, pas besoin de la version .NET).
+1. Installe Godot 4.7 ou plus récent (version standard, pas besoin de la version .NET).
 2. Dans Godot, clique sur **Importer**, choisis le fichier `project.godot` de ce dossier.
 3. Appuie sur **F5** (ou le bouton ▶ en haut à droite).
 
