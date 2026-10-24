@@ -37,6 +37,7 @@ var _status := ""
 var _visual: Node3D
 var _label: Label3D
 var _model := ""
+var _animator: HunterAnimator
 
 
 func setup(game: Main, kind: Personality) -> void:
@@ -70,10 +71,9 @@ func _physics_process(delta: float) -> void:
 		return
 	if _stun_timer > 0.0:
 		_stun_timer -= delta
-		_visual.rotation.z = 0.5
+		_animator.update(delta, 0.0, true)
 		_set_status("zZ")
 		return
-	_visual.rotation.z = 0.0
 	_chase_timer = maxf(_chase_timer - delta, 0.0)
 	_repath_timer -= delta
 	if _repath_timer <= 0.0:
@@ -81,6 +81,7 @@ func _physics_process(delta: float) -> void:
 		_path = _game.find_path(global_position, _choose_goal())
 		_path_index = 0
 	_follow_path()
+	_animator.update(delta, Vector2(velocity.x, velocity.z).length())
 	if _game.relic_carrier == self and _game.is_on_exit(global_position):
 		_game.on_rival_escaped(self)
 
@@ -100,6 +101,7 @@ func can_hit() -> bool:
 
 func on_hit_landed() -> void:
 	_hit_cooldown = HIT_COOLDOWN
+	_animator.trigger(&"attack")
 
 
 ## Appelé par l'alerte générale : quelqu'un a pris, perdu ou fait tomber la relique.
@@ -225,7 +227,9 @@ func _build_body() -> void:
 
 	_visual = Node3D.new()
 	add_child(_visual)
-	_visual.add_child(Kit.spawn(_model))
+	var model := Kit.spawn(_model)
+	_visual.add_child(model)
+	_animator = HunterAnimator.new(model)
 
 	_label = Label3D.new()
 	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED

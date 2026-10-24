@@ -32,7 +32,7 @@ var _slash_timer := 0.0
 var _invulnerable_timer := 0.0
 var _visual: Node3D
 var _slash: MeshInstance3D
-var _step_time := 0.0
+var _animator: HunterAnimator
 
 
 func _ready() -> void:
@@ -56,6 +56,7 @@ func _physics_process(delta: float) -> void:
 		_dash_timer = DASH_TIME
 		_dash_cooldown = DASH_COOLDOWN
 		_dash_direction = facing
+		_animator.trigger(&"dash")
 
 	if Input.is_action_just_pressed(&"attack") and _attack_cooldown <= 0.0:
 		_attack()
@@ -68,7 +69,7 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	position.y = 0.0
 	rotation.y = atan2(facing.x, facing.z)
-	_animate(delta)
+	_animator.update(delta, Vector2(velocity.x, velocity.z).length())
 
 
 ## Retourne true si le coup porte. Le dash et l'invulnérabilité après un coup protègent.
@@ -79,6 +80,7 @@ func take_hit() -> bool:
 	_invulnerable_timer = INVULNERABLE_TIME
 	if health <= 0:
 		is_dead = true
+		_animator.freeze()
 		_visual.rotation.x = PI / 2.0
 		_visual.position.y = 0.3
 	return true
@@ -88,6 +90,7 @@ func _attack() -> void:
 	_attack_cooldown = ATTACK_COOLDOWN
 	_slash_timer = SLASH_TIME
 	_slash.visible = true
+	_animator.trigger(&"attack")
 	attacked.emit(global_position, facing)
 
 
@@ -113,7 +116,9 @@ func _build_body() -> void:
 
 	_visual = Node3D.new()
 	add_child(_visual)
-	_visual.add_child(Kit.spawn(MODEL))
+	var model := Kit.spawn(MODEL)
+	_visual.add_child(model)
+	_animator = HunterAnimator.new(model)
 
 	var slash_mesh := BoxMesh.new()
 	slash_mesh.size = Vector3(1.8, 0.08, 0.5)
@@ -130,12 +135,3 @@ func _build_body() -> void:
 	light.omni_range = 4.0
 	light.position.y = 2.0
 	add_child(light)
-
-
-## En attendant le rig : petit rebond et penchée vers l'avant quand le hunter court.
-func _animate(delta: float) -> void:
-	var speed := Vector2(velocity.x, velocity.z).length()
-	if speed > 0.1:
-		_step_time += delta * speed * 2.2
-	_visual.position.y = absf(sin(_step_time)) * 0.06 * minf(speed / SPEED, 1.0)
-	_visual.rotation.x = lerpf(_visual.rotation.x, 0.12 * minf(speed / SPEED, 1.0), delta * 10.0)

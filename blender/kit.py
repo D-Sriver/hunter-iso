@@ -698,15 +698,17 @@ def body(spec):
     parts = []
     for side in (-1, 1):
         x = side * hip_x
-        parts.append(skin_part([
+        suffix = side_suffix(side)
+        parts.append(tag(skin_part([
             ((0, 0, 0.98), pelvis[0] * 0.8, pelvis[1]), ((x, 0, 0.88), 0.1 * bulk, 0.1 * bulk),
             ((x * 1.05, -0.01, 0.5), 0.07 * bulk, 0.072 * bulk),
             ((x * 1.1, 0.01, 0.16), 0.055 * bulk, 0.058 * bulk)],
-            [(0, 1), (1, 2), (2, 3)], pants))
-        parts.append(skin_part([
+            [(0, 1), (1, 2), (2, 3)], pants), f"hips thigh.{suffix} shin.{suffix}"))
+        parts.append(tag(skin_part([
             ((x * 1.08, 0.0, 0.36), 0.078 * bulk, 0.08 * bulk),
             ((x * 1.1, 0.01, 0.1), 0.07 * bulk, 0.074 * bulk),
-            ((x * 1.1, -0.12, 0.045), 0.058 * bulk, 0.05 * bulk)], [(0, 1), (1, 2)], "rubber"))
+            ((x * 1.1, -0.12, 0.045), 0.058 * bulk, 0.05 * bulk)], [(0, 1), (1, 2)], "rubber"),
+            f"shin.{suffix}", rigid=True))
 
     puff = 0.02 if spec["outfit"] == "bomber" else 0.0
     torso = coat if spec["outfit"] != "armor" else "metal_dark"
@@ -722,14 +724,16 @@ def body(spec):
                    ((side * (shoulder + 0.055), 0.02, 1.15), arm[1], arm[1]),
                    ((side * (shoulder + 0.085), -0.01, 0.92), arm[2], arm[2])]
         edges += [(3, base), (base, base + 1), (base + 1, base + 2)]
-    parts.append(skin_part(joints, edges, torso))
-    parts.append(skin_part([((0, 0, 1.42), 0.042, 0.042), ((0, 0.005, 1.56), 0.04, 0.04)],
-                           [(0, 1)], "skin"))
+    parts.append(tag(skin_part(joints, edges, torso),
+                     "hips spine upper_arm.L forearm.L upper_arm.R forearm.R"))
+    parts.append(tag(skin_part([((0, 0, 1.42), 0.042, 0.042), ((0, 0.005, 1.56), 0.04, 0.04)],
+                               [(0, 1)], "skin"), "spine head"))
     for side in (-1, 1):
-        parts.append(skin_part([
+        parts.append(tag(skin_part([
             ((side * (shoulder + 0.087), -0.012, 0.9), 0.05 * bulk, 0.042 * bulk),
-            ((side * hand_x, -0.02, 0.82), 0.058 * bulk, 0.036 * bulk)], [(0, 1)], "rubber"))
-    return parts, hand_x, chest, waist, shoulder, pelvis
+            ((side * hand_x, -0.02, 0.82), 0.058 * bulk, 0.036 * bulk)], [(0, 1)], "rubber"),
+            f"forearm.{side_suffix(side)}", rigid=True))
+    return parts, hand_x, chest, waist, shoulder, pelvis, hip_x
 
 
 def outfit(spec, chest, waist, shoulder, pelvis):
@@ -871,17 +875,209 @@ def hairstyle(spec):
 
 def hunter(spec):
     """Assemble un hunter d'environ 1,75 m (1,85 m pour le costaud)."""
-    parts, hand_x, chest, waist, shoulder, pelvis = body(spec)
-    parts += head(spec)
-    parts += outfit(spec, chest, waist, shoulder, pelvis)
-    parts += hairstyle(spec)
-    parts += weapon(spec["weapon"], spec["accent"], hand_x)
-    obj = join(spec["name"], parts)
+    parts, hand_x, chest, waist, shoulder, pelvis, hip_x = body(spec)
+    parts += [tag(part, "head", rigid=True) for part in head(spec) + hairstyle(spec)]
+    parts += [tag(part, "hips spine thigh.L thigh.R")
+              for part in outfit(spec, chest, waist, shoulder, pelvis)]
+    parts += [tag(part, "spine hips forearm.L forearm.R", rigid=True)
+              for part in weapon(spec["weapon"], spec["accent"], hand_x)]
+
+    bones = hunter_bones(shoulder, hip_x)
+    for part in parts:
+        skin_weights(part, bones)
+    mesh = join(spec["name"] + "_mesh", parts)
+    rig = build_rig(spec["name"], bones)
+    mesh.parent = rig
+    mesh.modifiers.new("rig", "ARMATURE").object = rig
+    animate(rig)
     if spec["body"] == "big":
-        obj.scale = (1.06, 1.06, 1.06)
+        rig.scale = (1.06, 1.06, 1.06)
     elif spec["body"] == "female":
-        obj.scale = (0.96, 0.96, 0.96)
-    return obj
+        rig.scale = (0.96, 0.96, 0.96)
+    return rig
+
+
+# --- Squelette et animations des hunters ---------------------------------------------------------
+# Chaque pièce dit à quels os elle peut s'accrocher : les pièces rigides (tête, cheveux, armes,
+# gants, bottes) suivent un seul os, les volumes souples (jambes, torse, manteau) se partagent
+# entre les deux os les plus proches de chaque sommet.
+
+def side_suffix(side):
+    """Côté +X = gauche du personnage (il regarde vers -Y), comme le veut Blender."""
+    return "L" if side > 0 else "R"
+
+
+def tag(part, bones, rigid=False):
+    part["bones"] = bones
+    part["rigid"] = rigid
+    return part
+
+
+def hunter_bones(shoulder, hip_x):
+    """Os du hunter : nom -> (tête, queue, parent). Les parents viennent avant leurs enfants."""
+    bones = {
+        "hips": ((0, 0, 0.92), (0, 0, 1.1), None),
+        "spine": ((0, 0, 1.1), (0, 0, 1.42), "hips"),
+        "head": ((0, 0, 1.45), (0, 0, 1.8), "spine"),
+    }
+    for side in (1, -1):
+        suffix = side_suffix(side)
+        elbow = (side * (shoulder + 0.055), 0.02, 1.15)
+        knee = (side * hip_x * 1.05, -0.01, 0.5)
+        bones[f"upper_arm.{suffix}"] = ((side * shoulder, 0, 1.41), elbow, "spine")
+        bones[f"forearm.{suffix}"] = (elbow, (side * (shoulder + 0.095), -0.02, 0.82),
+                                      f"upper_arm.{suffix}")
+        bones[f"thigh.{suffix}"] = ((side * hip_x, 0, 0.9), knee, "hips")
+        bones[f"shin.{suffix}"] = (knee, (side * hip_x * 1.1, 0.01, 0.08), f"thigh.{suffix}")
+    return bones
+
+
+def segment_distance(point, head, tail):
+    from mathutils.geometry import intersect_point_line
+    closest, t = intersect_point_line(point, Vector(head), Vector(tail))
+    if t < 0:
+        closest = Vector(head)
+    elif t > 1:
+        closest = Vector(tail)
+    return (point - closest).length
+
+
+def skin_weights(part, bones):
+    names = part["bones"].split()
+    groups = {name: part.vertex_groups.new(name=name) for name in names}
+    vertices = part.data.vertices
+    if part["rigid"]:
+        center = sum((v.co for v in vertices), Vector()) / len(vertices)
+        best = min(names, key=lambda name: segment_distance(center, *bones[name][:2]))
+        groups[best].add([v.index for v in vertices], 1.0, "REPLACE")
+        return
+    for vertex in vertices:
+        nearest = sorted((segment_distance(vertex.co, *bones[name][:2]), name)
+                         for name in names)[:2]
+        weights = [1.0 / (distance ** 4 + 1e-7) for distance, _ in nearest]
+        total = sum(weights)
+        for (_, name), weight in zip(nearest, weights):
+            groups[name].add([vertex.index], weight / total, "REPLACE")
+
+
+def build_rig(name, bones):
+    data = bpy.data.armatures.new(name)
+    rig = bpy.data.objects.new(name, data)
+    KIT.objects.link(rig)
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode="EDIT")
+    for bone_name, (head, tail, parent) in bones.items():
+        bone = data.edit_bones.new(bone_name)
+        bone.head = head
+        bone.tail = tail
+        bone.roll = 0.0
+        if parent is not None:
+            bone.parent = data.edit_bones[parent]
+    bpy.ops.object.mode_set(mode="OBJECT")
+    for pose_bone in rig.pose.bones:
+        pose_bone.rotation_mode = "XYZ"
+    return rig
+
+
+def mirrored(pose):
+    """Même pose de l'autre côté : on échange les os gauche et droite."""
+    swapped = {}
+    for bone, value in pose.items():
+        if bone.endswith(".L"):
+            bone = bone[:-2] + ".R"
+        elif bone.endswith(".R"):
+            bone = bone[:-2] + ".L"
+        swapped[bone] = value
+    return swapped
+
+
+# Conventions des rotations (repère local des os, roll nul) :
+# jambes et bras : X négatif = vers l'avant ; tibia et avant-bras : X positif plie le genou,
+# X négatif plie le coude ; colonne : X positif = penché en avant, Y = torsion.
+RELAXED = {"forearm.L": (-0.25, 0, 0), "forearm.R": (-0.25, 0, 0)}
+RUN_CONTACT = {
+    "thigh.L": (-0.75, 0, 0), "shin.L": (0.25, 0, 0),
+    "thigh.R": (0.55, 0, 0), "shin.R": (1.0, 0, 0),
+    "upper_arm.L": (0.65, 0, 0), "upper_arm.R": (-0.65, 0, 0),
+    "forearm.L": (-0.7, 0, 0), "forearm.R": (-1.1, 0, 0),
+    "spine": (0.22, 0.12, 0), "head": (-0.15, -0.1, 0), "lift": 0.0,
+}
+RUN_PASSING = {
+    "thigh.L": (-0.1, 0, 0), "shin.L": (0.15, 0, 0),
+    "thigh.R": (-0.25, 0, 0), "shin.R": (1.5, 0, 0),
+    "upper_arm.L": (0.1, 0, 0), "upper_arm.R": (-0.1, 0, 0),
+    "forearm.L": (-0.9, 0, 0), "forearm.R": (-0.9, 0, 0),
+    "spine": (0.2, 0, 0), "head": (-0.15, 0, 0), "lift": 0.06,
+}
+CLIPS = {
+    # nom : liste de (image, pose) ; les boucles reprennent leur première pose à la fin.
+    "idle": [
+        (1, RELAXED),
+        (25, {**RELAXED, "spine": (0.04, 0, 0), "head": (-0.05, 0, 0), "lift": -0.012,
+              "upper_arm.L": (0.06, 0, 0), "upper_arm.R": (0.06, 0, 0)}),
+        (49, RELAXED),
+    ],
+    "run": [
+        (1, RUN_CONTACT), (5, RUN_PASSING), (9, mirrored(RUN_CONTACT)),
+        (13, mirrored(RUN_PASSING)), (17, RUN_CONTACT),
+    ],
+    "dash": [
+        (1, {"spine": (0.55, 0, 0), "head": (-0.4, 0, 0), "upper_arm.L": (1.0, 0, 0),
+             "upper_arm.R": (1.0, 0, 0), "thigh.L": (-0.9, 0, 0), "shin.L": (0.6, 0, 0),
+             "thigh.R": (0.7, 0, 0), "shin.R": (0.6, 0, 0), "lift": -0.05}),
+        (8, {"spine": (0.55, 0, 0), "head": (-0.4, 0, 0), "upper_arm.L": (1.1, 0, 0),
+             "upper_arm.R": (1.1, 0, 0), "thigh.L": (-0.9, 0, 0), "shin.L": (0.6, 0, 0),
+             "thigh.R": (0.7, 0, 0), "shin.R": (0.6, 0, 0), "lift": -0.05}),
+    ],
+    "attack": [
+        (1, RELAXED),
+        (4, {"spine": (0.05, 0.6, 0), "upper_arm.R": (-1.5, 0, 0), "forearm.R": (-0.6, 0, 0),
+             "upper_arm.L": (0.3, 0, 0), "thigh.L": (-0.3, 0, 0), "thigh.R": (0.2, 0, 0)}),
+        (7, {"spine": (0.2, -0.7, 0), "upper_arm.R": (-1.2, 0, 0), "forearm.R": (-0.1, 0, 0),
+             "upper_arm.L": (0.5, 0, 0), "thigh.L": (-0.45, 0, 0), "shin.L": (0.3, 0, 0),
+             "thigh.R": (0.35, 0, 0), "lift": -0.04}),
+        (12, RELAXED),
+    ],
+    "stunned": [
+        (1, {"spine": (0.4, 0, 0.12), "head": (0.35, 0.2, 0.25), "upper_arm.L": (0.2, 0, 0),
+             "upper_arm.R": (0.2, 0, 0), "thigh.L": (-0.2, 0, 0), "shin.L": (0.4, 0, 0),
+             "thigh.R": (-0.2, 0, 0), "shin.R": (0.4, 0, 0), "lift": -0.06}),
+        (13, {"spine": (0.4, 0, -0.12), "head": (0.35, -0.2, -0.25), "upper_arm.L": (0.2, 0, 0),
+              "upper_arm.R": (0.2, 0, 0), "thigh.L": (-0.2, 0, 0), "shin.L": (0.4, 0, 0),
+              "thigh.R": (-0.2, 0, 0), "shin.R": (0.4, 0, 0), "lift": -0.06}),
+        (25, {"spine": (0.4, 0, 0.12), "head": (0.35, 0.2, 0.25), "upper_arm.L": (0.2, 0, 0),
+              "upper_arm.R": (0.2, 0, 0), "thigh.L": (-0.2, 0, 0), "shin.L": (0.4, 0, 0),
+              "thigh.R": (-0.2, 0, 0), "shin.R": (0.4, 0, 0), "lift": -0.06}),
+    ],
+}
+
+
+def apply_pose(rig, pose):
+    for pose_bone in rig.pose.bones:
+        pose_bone.rotation_euler = pose.get(pose_bone.name, (0.0, 0.0, 0.0))
+        pose_bone.location = (0.0, 0.0, 0.0)
+    # Le bassin pointe vers le haut : son axe Y local est la verticale.
+    rig.pose.bones["hips"].location = (0.0, pose.get("lift", 0.0), 0.0)
+
+
+def animate(rig):
+    """Une action par animation, rangée dans une piste NLA du squelette : l'export glTF sort
+    une animation par piste, sans mélanger celles des autres hunters."""
+    rig.animation_data_create()
+    for clip, keys in CLIPS.items():
+        action = bpy.data.actions.new(f"{rig.name}_{clip}")
+        rig.animation_data.action = action
+        for frame, pose in keys:
+            apply_pose(rig, pose)
+            for pose_bone in rig.pose.bones:
+                pose_bone.keyframe_insert("rotation_euler", frame=frame)
+                pose_bone.keyframe_insert("location", frame=frame)
+        rig.animation_data.action = None
+        track = rig.animation_data.nla_tracks.new()
+        track.name = clip
+        track.strips.new(clip, 1, action)
+        track.mute = True
+    apply_pose(rig, {})
 
 
 def weapon(kind, accent, hand_x):
@@ -943,9 +1139,12 @@ def export(obj):
     os.makedirs(KIT_DIR, exist_ok=True)
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
+    for child in obj.children:
+        child.select_set(True)
     bpy.context.view_layer.objects.active = obj
     bpy.ops.export_scene.gltf(filepath=os.path.join(KIT_DIR, obj.name + ".glb"),
-                              export_format="GLB", use_selection=True, export_apply=True)
+                              export_format="GLB", use_selection=True, export_apply=True,
+                              export_animation_mode="NLA_TRACKS")
 
 
 def build_kit():
@@ -966,11 +1165,21 @@ def build_kit():
     return {piece.name: piece for piece in pieces}
 
 
-def place(kit, name, location, rotation_z=0.0):
+def place(kit, name, location, rotation_z=0.0, pose=None):
     obj = kit[name].copy()
     bpy.context.scene.collection.objects.link(obj)
     obj.location = location
     obj.rotation_euler = (0.0, 0.0, rotation_z)
+    # Un hunter est un squelette : on copie aussi son maillage, rattaché à la copie.
+    for child in kit[name].children:
+        copy = child.copy()
+        bpy.context.scene.collection.objects.link(copy)
+        copy.parent = obj
+        for modifier in copy.modifiers:
+            if modifier.type == "ARMATURE":
+                modifier.object = obj
+    if pose is not None:
+        apply_pose(obj, pose)
     return obj
 
 
@@ -1112,6 +1321,23 @@ def render_lineup(kit, path):
     shoot(path, Vector((0.0, 0.0, 0.95)), 7.2, (1600, 900), azimuth=20)
 
 
+def render_poses(kit, path):
+    """Kaz dans les poses clés de chaque animation, pour vérifier le squelette."""
+    KIT.hide_render = True
+    for x in range(-1, 2):
+        for y in range(-1, 2):
+            place(kit, "floor_room", (x * TILE * 2, y * TILE, 0)).scale = (2, 1, 1)
+    azimuth = math.radians(20)
+    row = Vector((math.cos(azimuth), math.sin(azimuth), 0))
+    poses = [CLIPS["idle"][0][1], CLIPS["run"][0][1], CLIPS["run"][1][1], CLIPS["dash"][0][1],
+             CLIPS["attack"][1][1], CLIPS["attack"][2][1], CLIPS["stunned"][0][1]]
+    for i, pose in enumerate(poses):
+        place(kit, "hunter_kaz", row * (i - 3) * 1.1, azimuth - math.radians(60), pose=pose)
+    point_light((-3.0, -2.0, 2.5), NEON_PINK, 120)
+    point_light((3.0, -2.0, 2.5), NEON_TEAL, 120)
+    shoot(path, Vector((0.0, 0.0, 0.95)), 8.0, (1600, 900), azimuth=20)
+
+
 def render_portrait(kit, path):
     """Gros plan sur les visages de Kaz et Nova, pour juger les têtes et les coiffures."""
     KIT.hide_render = True
@@ -1195,6 +1421,8 @@ if __name__ == "__main__":
     kit_objects = build_kit()
     if "--preview" in sys.argv:
         render_preview(kit_objects, os.path.join(RENDER_DIR, "preview.png"))
+    elif "--poses" in sys.argv:
+        render_poses(kit_objects, os.path.join(RENDER_DIR, "poses.png"))
     elif "--portrait" in sys.argv:
         render_portrait(kit_objects, os.path.join(RENDER_DIR, "portrait.png"))
     elif "--lineup" in sys.argv:

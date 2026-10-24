@@ -31,6 +31,7 @@ blender --background --python blender/kit.py                 # exporte assets/ki
 blender --background --python blender/kit.py -- --preview    # + rendu d'une salle
 blender --background --python blender/kit.py -- --lineup     # + rendu des six hunters
 blender --background --python blender/kit.py -- --portrait   # + gros plan des visages
+blender --background --python blender/kit.py -- --poses      # + poses clés des animations
 ```
 
 Les rendus vont dans `docs/renders/`.
@@ -43,3 +44,5 @@ Les rendus vont dans `docs/renders/`.
 - `scripts/kit.gd` : charge les `.glb` et leur applique le rendu anime (ombrage en deux tons,
   contour via `shaders/outline.gdshader`).
 - `scripts/player.gd`, `scripts/rival.gd` : le joueur et les hunters rivaux (IA par personnalité).
+- `scripts/hunter_animator.gd` : choisit l'animation d'un hunter (repos, course, dash, attaque,
+  assommé), toutes faites dans `blender/kit.py`.
