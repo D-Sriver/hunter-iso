@@ -26,6 +26,7 @@ import textures  # noqa: E402
 ROOT = os.path.dirname(HERE)
 KIT_DIR = os.path.join(ROOT, "assets", "kit")
 TEXTURE_DIR = os.path.join(KIT_DIR, "textures")
+RENDER_DIR = os.path.join(ROOT, "docs", "renders")
 
 TILE = 2.0
 WALL_HEIGHT = 3.0
@@ -464,13 +465,21 @@ def exit_pad():
     return join("exit_pad", parts)
 
 
-def loot_chest():
-    return join("loot_chest", [
-        box((0.9, 0.55, 0.45), (0, 0, 0.225), "metal_dark", bevel=0.03),
-        box((0.94, 0.59, 0.12), (0, 0, 0.51), "metal", bevel=0.02),
-        box((0.92, 0.02, 0.04), (0, -0.285, 0.36), "neon_gold"),
-        box((0.12, 0.03, 0.12), (0, -0.29, 0.45), "neon_gold"),
-    ])
+def loot_chest(opened=False):
+    """Coffre de butin ; la version ouverte a le couvercle relevé et les néons éteints."""
+    parts = [box((0.9, 0.55, 0.45), (0, 0, 0.225), "metal_dark", bevel=0.03)]
+    if opened:
+        parts += [
+            box((0.94, 0.59, 0.12), (0, 0.33, 0.74), "metal", bevel=0.02, rotation=(-1.3, 0, 0)),
+            box((0.8, 0.45, 0.02), (0, 0, 0.44), "rubber"),
+        ]
+    else:
+        parts += [
+            box((0.94, 0.59, 0.12), (0, 0, 0.51), "metal", bevel=0.02),
+            box((0.92, 0.02, 0.04), (0, -0.285, 0.36), "neon_gold"),
+            box((0.12, 0.03, 0.12), (0, -0.29, 0.45), "neon_gold"),
+        ]
+    return join("loot_chest_open" if opened else "loot_chest", parts)
 
 
 def barrel():
@@ -947,7 +956,7 @@ def build_kit():
         wall_neon("wall_neon_teal", "24H OPEN", "neon_teal"),
         wall_door(), wall_stub(), wall_post(),
         server_rack(), crate(), crate_stack(), terminal(), desk(), lab_table(), pillar(),
-        pedestal(), relic(), exit_pad(), loot_chest(), barrel(),
+        pedestal(), relic(), exit_pad(), loot_chest(), loot_chest(opened=True), barrel(),
     ] + [hunter(spec) for spec in HUNTERS]
     for piece in pieces:
         export(piece)
@@ -1182,8 +1191,8 @@ def shoot(path, target, ortho_scale, resolution, azimuth=45, elevation=57):
 if __name__ == "__main__":
     kit_objects = build_kit()
     if "--preview" in sys.argv:
-        render_preview(kit_objects, os.path.join(KIT_DIR, "preview.png"))
+        render_preview(kit_objects, os.path.join(RENDER_DIR, "preview.png"))
     elif "--portrait" in sys.argv:
-        render_portrait(kit_objects, os.path.join(KIT_DIR, "portrait.png"))
+        render_portrait(kit_objects, os.path.join(RENDER_DIR, "portrait.png"))
     elif "--lineup" in sys.argv:
-        render_lineup(kit_objects, os.path.join(KIT_DIR, "hunters.png"))
+        render_lineup(kit_objects, os.path.join(RENDER_DIR, "hunters.png"))
