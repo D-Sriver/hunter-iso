@@ -13,13 +13,17 @@ pendant que les hunters rivaux te traquent.
 Ouvre le dossier dans Godot 4.7 puis appuie sur F5. Au premier lancement, Godot importe les
 modèles `.glb` du kit, ça prend quelques secondes.
 
+Le jeu démarre au hub : parle à la relique, achète des implants au terminal, puis monte sur la
+plateforme verte pour partir en mission. À la fin d'une run, E ramène au hub.
+
 | Action | Clavier | Manette |
 |---|---|---|
 | Se déplacer | ZQSD / WASD / flèches | stick gauche |
 | Attaquer (assomme) | J ou clic gauche | X |
 | Dash | Espace | A |
 | Ouvrir un coffre / fuir | E | Y |
-| Nouvelle run | R | Start |
+| Recommencer la run | R | Start |
+| Boutique : choisir / fermer | haut, bas / Espace | stick / A |
 
 ## Régénérer les modèles
 
@@ -38,7 +42,10 @@ Les rendus vont dans `docs/renders/`.
 
 ## Organisation
 
-- `scripts/main.gd` : déroulé d'une run (relique, alerte, coffres, sorties, caméra, ambiance).
+- `scripts/hub.gd`, `scripts/hub_ui.gd` : le hub entre les runs (dialogues, boutique, départ).
+- `scripts/relic_lines.gd` : les répliques de la relique qui parle.
+- `scripts/implants.gd`, `scripts/save_data.gd` : implants achetés et progression sauvegardée.
+- `scripts/main.gd` : déroulé d'une run (relique, alerte, coffres, sorties).
 - `scripts/level_generator.gd` : plan du niveau en salles reliées par des couloirs.
 - `scripts/level_builder.gd`, `scripts/decor.gd` : pose les pièces du kit sur ce plan.
 - `scripts/kit.gd` : charge les `.glb` et leur applique le rendu anime (ombrage en deux tons,

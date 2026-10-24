@@ -26,16 +26,11 @@ const RIVAL_SPAWN_MIN_RATIO := 0.4
 ## Hauteur des yeux pour les lignes de vue : les caisses et les tables basses ne cachent pas,
 ## les baies serveur et les piliers si.
 const EYE_HEIGHT := Vector3(0.0, 1.3, 0.0)
-const CAMERA_OFFSET := Vector3(15.0, 15.0, 15.0)
 const CAMERA_SIZE := 16.0
-const CAMERA_FOLLOW_SPEED := 6.0
 const RELIC_COLOR := Color(0.3, 1.0, 1.0)
-## Réglages de l'ambiance, à ajuster à l'œil.
-const BACKGROUND_COLOR := Color(0.13, 0.09, 0.24)
-const AMBIENT_COLOR := Color(0.62, 0.56, 0.9)
-const AMBIENT_ENERGY := 0.55
-const MOON_COLOR := Color(0.92, 0.9, 1.0)
-const MOON_ENERGY := 1.3
+const HUB_SCENE := "res://scenes/hub.tscn"
+## Délai avant d'accepter « retour au hub » : la touche qui finit la run ne doit pas le valider.
+const END_SCREEN_DELAY := 0.6
 const BEACON_COLOR := Color(1.0, 0.25, 0.35)
 
 var level: LevelGenerator
@@ -51,8 +46,8 @@ var _chests: Array[Chest] = []
 var _relic_lost := false
 var _beacon: MeshInstance3D
 var _beacon_timer := 0.0
-var _camera: Camera3D
-var _camera_focus := Vector3.ZERO
+var _camera: IsoCamera
+var _end_timer := 0.0
 var _hud: Hud
 var _run_state := RunState.PLAYING
 var _loot := 0
@@ -67,7 +62,7 @@ func _ready() -> void:
 	_setup_pathfinding()
 	_rng.randomize()
 	LevelBuilder.build(self, level, TILE_SIZE, _rng)
-	_setup_environment()
+	Ambience.setup(self)
 	_spawn_player()
 	_spawn_relic()
 	_spawn_chests()
@@ -84,7 +79,11 @@ func _process(delta: float) -> void:
 	if Input.is_action_just_pressed(&"restart"):
 		get_tree().reload_current_scene()
 		return
-	_update_camera(delta)
+	if _run_state != RunState.PLAYING:
+		_end_timer += delta
+		if _end_timer > END_SCREEN_DELAY and Input.is_action_just_pressed(&"interact"):
+			get_tree().change_scene_to_file(HUB_SCENE)
+			return
 	_update_beacon(delta)
 	relic.rotate_y(delta * 2.0)
 
@@ -98,7 +97,7 @@ func _physics_process(delta: float) -> void:
 	if hint.is_empty():
 		hint = _update_exits()
 	_hud.set_hint(hint)
-	_hud.set_stats(player.health, Player.MAX_HEALTH, _loot, _credits, relic_carrier == player)
+	_hud.set_stats(player.health, player.max_health, _loot, _credits, relic_carrier == player)
 
 
 # --- Requêtes utilisées par les rivaux ---
@@ -244,7 +243,7 @@ func _on_player_attacked(origin: Vector3, facing: Vector3) -> void:
 		to_rival.y = 0.0
 		if to_rival.length() > ATTACK_RANGE or facing.dot(to_rival.normalized()) < 0.3:
 			continue
-		rival.stun(ATTACK_STUN_TIME)
+		rival.stun(ATTACK_STUN_TIME + Implants.extra_stun_time())
 		if relic_carrier == rival:
 			_drop_relic(rival.global_position)
 
@@ -325,9 +324,16 @@ func _end_run(escaped: bool, title: String) -> void:
 	if escaped:
 		gained = _loot + (RELIC_VALUE if relic_carrier == player else 0)
 	_credits = SaveData.add_credits(gained)
-	_hud.set_stats(player.health, Player.MAX_HEALTH, _loot, _credits, relic_carrier == player)
+	if not escaped:
+		SaveData.record_run("dead")
+	else:
+		SaveData.record_run("relic" if relic_carrier == player else "loot")
+	_hud.set_stats(player.health, player.max_health, _loot, _credits, relic_carrier == player)
 	_hud.show_end(
-		"%s\n+%d ¢   (total : %d ¢)\n\nR pour une nouvelle run" % [title, gained, _credits]
+		(
+			"%s\n+%d ¢   (total : %d ¢)\n\nE : retour au hub   R : nouvelle run"
+			% [title, gained, _credits]
+		)
 	)
 	player.set_physics_process(false)
 
@@ -355,32 +361,6 @@ func _walkable_tile_near(tile: Vector2i) -> Vector2i:
 		if level.is_floor(neighbor):
 			return neighbor
 	return level.start_tile
-
-
-func _setup_environment() -> void:
-	# Rendu anime : fond indigo, ombres lavande (jamais noires), couleurs sans tonemapping
-	# et halo seulement sur ce qui brille vraiment (néons, écrans).
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = BACKGROUND_COLOR
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = AMBIENT_COLOR
-	environment.ambient_light_energy = AMBIENT_ENERGY
-	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
-	environment.glow_enabled = true
-	environment.glow_intensity = 0.9
-	environment.glow_hdr_threshold = 1.0
-	environment.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
-	var world_environment := WorldEnvironment.new()
-	world_environment.environment = environment
-	add_child(world_environment)
-
-	var moon := DirectionalLight3D.new()
-	moon.rotation_degrees = Vector3(-50.0, -30.0, 0.0)
-	moon.light_color = MOON_COLOR
-	moon.light_energy = MOON_ENERGY
-	moon.shadow_enabled = true
-	add_child(moon)
 
 
 func _spawn_player() -> void:
@@ -472,25 +452,10 @@ func _spawn_rivals() -> void:
 
 
 func _setup_camera() -> void:
-	_camera = Camera3D.new()
-	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	_camera.size = CAMERA_SIZE
-	_camera.far = 200.0
+	_camera = IsoCamera.new(CAMERA_SIZE)
+	_camera.target = player
 	add_child(_camera)
-	_camera_focus = player.global_position
-	_place_camera()
-
-
-func _update_camera(delta: float) -> void:
-	_camera_focus = _camera_focus.lerp(
-		player.global_position, minf(delta * CAMERA_FOLLOW_SPEED, 1.0)
-	)
-	_place_camera()
-
-
-func _place_camera() -> void:
-	_camera.global_position = _camera_focus + CAMERA_OFFSET
-	_camera.look_at(_camera_focus, Vector3.UP)
+	_camera.snap()
 
 
 func _capitalized(text: String) -> String:
