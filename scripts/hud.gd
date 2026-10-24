@@ -6,7 +6,7 @@ const ALERT_COLOR := Color(1.0, 0.3, 0.4)
 const TEXT_COLOR := Color(0.85, 0.95, 1.0)
 const HINT_COLOR := Color(1.0, 0.85, 0.3)
 const CONTROLS_TEXT := (
-	"ZQSD / flèches : bouger   Espace : dash   J / clic : frapper"
+	"ZQSD / flèches : bouger   Souris : viser   Espace : dash   J / clic : frapper"
 	+ "   E : interagir   R : recommencer"
 )
 
