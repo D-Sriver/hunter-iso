@@ -26,7 +26,7 @@ const STEAL_STUN_TIME := 1.5
 const ALERT_DURATION := 3.5
 const RIVAL_SPAWN_MIN_RATIO := 0.4
 const CAMERA_OFFSET := Vector3(15.0, 15.0, 15.0)
-const CAMERA_SIZE := 22.0
+const CAMERA_SIZE := 16.0
 const CAMERA_FOLLOW_SPEED := 6.0
 const RELIC_COLOR := Color(0.3, 1.0, 1.0)
 const BEACON_COLOR := Color(1.0, 0.25, 0.35)
@@ -62,6 +62,7 @@ func _ready() -> void:
 	_spawn_player()
 	_spawn_relic()
 	_spawn_chests()
+	_decorate()
 	_spawn_rivals()
 	_setup_camera()
 	_hud = Hud.new()
@@ -71,6 +72,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	RenderingServer.global_shader_parameter_set(&"player_position", player.global_position)
 	if Input.is_action_just_pressed(&"restart"):
 		get_tree().reload_current_scene()
 		return
@@ -350,22 +352,23 @@ func _walkable_tile_near(tile: Vector2i) -> Vector2i:
 func _setup_environment() -> void:
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color(0.02, 0.01, 0.06)
+	environment.background_color = Color(0.012, 0.016, 0.02)
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.4, 0.35, 0.7)
-	environment.ambient_light_energy = 0.6
+	environment.ambient_light_color = Color(0.35, 0.48, 0.5)
+	environment.ambient_light_energy = 0.35
 	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
+	environment.ssao_enabled = true
 	environment.glow_enabled = true
-	environment.glow_intensity = 0.9
-	environment.glow_bloom = 0.05
+	environment.glow_intensity = 1.0
+	environment.glow_bloom = 0.08
 	var world_environment := WorldEnvironment.new()
 	world_environment.environment = environment
 	add_child(world_environment)
 
 	var moon := DirectionalLight3D.new()
 	moon.rotation_degrees = Vector3(-60.0, 30.0, 0.0)
-	moon.light_color = Color(0.7, 0.75, 1.0)
-	moon.light_energy = 0.5
+	moon.light_color = Color(0.6, 0.75, 0.85)
+	moon.light_energy = 0.35
 	moon.shadow_enabled = true
 	add_child(moon)
 
@@ -422,6 +425,16 @@ func _spawn_chests() -> void:
 		add_child(chest)
 		chest.global_position = tile_to_world(tile)
 		_chests.append(chest)
+
+
+func _decorate() -> void:
+	var reserved: Array[Vector2i] = [maze.start_tile, maze.relic_tile]
+	reserved.append_array(maze.exit_tiles)
+	for chest in _chests:
+		reserved.append(world_to_tile(chest.global_position))
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	Decor.build(self, maze, TILE_SIZE, reserved, rng)
 
 
 func _spawn_rivals() -> void:

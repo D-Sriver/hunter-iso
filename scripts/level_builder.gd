@@ -1,17 +1,15 @@
 class_name LevelBuilder
 extends RefCounted
-## Construit la géométrie du labyrinthe : sol, murs néon, sorties.
-## Placeholders en primitives, remplacés plus tard par les tuiles modélisées dans Blender.
+## Construit la géométrie du labyrinthe : sol à circuits, murs à panneaux, sorties.
+## L'habillage vient des shaders ; les tuiles modélisées dans Blender les remplaceront.
 
-const WALL_HEIGHT := 1.6
-const WALL_CAP_HEIGHT := 0.08
+const WALL_HEIGHT := 2.6
 const WALL_LAYER := 1
 
-const FLOOR_COLOR := Color(0.09, 0.08, 0.16)
-const GAP_COLOR := Color(0.02, 0.01, 0.05)
-const WALL_COLOR := Color(0.12, 0.1, 0.22)
-const WALL_CAP_COLOR := Color(0.85, 0.2, 1.0)
+const GAP_COLOR := Color(0.01, 0.012, 0.015)
 const EXIT_COLOR := Color(0.2, 1.0, 0.55)
+const WALL_SHADER := preload("res://shaders/wall.gdshader")
+const FLOOR_SHADER := preload("res://shaders/floor.gdshader")
 
 
 static func build(parent: Node3D, maze: MazeGenerator, tile_size: float) -> void:
@@ -33,11 +31,11 @@ static func _build_floor(parent: Node3D, maze: MazeGenerator, tile_size: float) 
 
 	# Une dalle par tuile, légèrement plus petite : les interstices dessinent la grille.
 	var slab := BoxMesh.new()
-	slab.size = Vector3(tile_size * 0.94, 0.1, tile_size * 0.94)
-	slab.material = Materials.flat(FLOOR_COLOR)
+	slab.size = Vector3(tile_size * 0.97, 0.1, tile_size * 0.97)
+	slab.material = _shader_material(FLOOR_SHADER)
 	var transforms: Array[Transform3D] = []
 	for tile in maze.floor_tiles:
-		transforms.append(Transform3D(Basis(), _tile_position(tile, tile_size, -0.05)))
+		transforms.append(Transform3D(Basis(), tile_position(tile, tile_size, -0.05)))
 	parent.add_child(_multimesh(slab, transforms))
 
 
@@ -46,24 +44,17 @@ static func _build_walls(parent: Node3D, maze: MazeGenerator, tile_size: float) 
 
 	var block := BoxMesh.new()
 	block.size = Vector3(tile_size, WALL_HEIGHT, tile_size)
-	block.material = Materials.flat(WALL_COLOR)
-	var cap := BoxMesh.new()
-	cap.size = Vector3(tile_size, WALL_CAP_HEIGHT, tile_size)
-	cap.material = Materials.neon(WALL_CAP_COLOR, 1.2)
+	var wall_material := _shader_material(WALL_SHADER)
+	wall_material.set_shader_parameter(&"wall_height", WALL_HEIGHT)
+	wall_material.set_shader_parameter(&"tile_size", tile_size)
+	block.material = wall_material
 
 	var block_transforms: Array[Transform3D] = []
-	var cap_transforms: Array[Transform3D] = []
 	for tile in wall_tiles:
 		block_transforms.append(
-			Transform3D(Basis(), _tile_position(tile, tile_size, WALL_HEIGHT * 0.5))
-		)
-		cap_transforms.append(
-			Transform3D(
-				Basis(), _tile_position(tile, tile_size, WALL_HEIGHT + WALL_CAP_HEIGHT * 0.5)
-			)
+			Transform3D(Basis(), tile_position(tile, tile_size, WALL_HEIGHT * 0.5))
 		)
 	parent.add_child(_multimesh(block, block_transforms))
-	parent.add_child(_multimesh(cap, cap_transforms))
 
 	var body := StaticBody3D.new()
 	body.collision_layer = WALL_LAYER
@@ -73,7 +64,7 @@ static func _build_walls(parent: Node3D, maze: MazeGenerator, tile_size: float) 
 	for tile in wall_tiles:
 		var collider := CollisionShape3D.new()
 		collider.shape = shape
-		collider.position = _tile_position(tile, tile_size, WALL_HEIGHT * 0.5)
+		collider.position = tile_position(tile, tile_size, WALL_HEIGHT * 0.5)
 		body.add_child(collider)
 	parent.add_child(body)
 
@@ -84,7 +75,7 @@ static func _build_exits(parent: Node3D, maze: MazeGenerator, tile_size: float) 
 	pad.material = Materials.neon(EXIT_COLOR, 2.0)
 	for tile in maze.exit_tiles:
 		var exit_root := Node3D.new()
-		exit_root.position = _tile_position(tile, tile_size, 0.0)
+		exit_root.position = tile_position(tile, tile_size, 0.0)
 		parent.add_child(exit_root)
 
 		var pad_instance := MeshInstance3D.new()
@@ -107,7 +98,7 @@ static func _build_exits(parent: Node3D, maze: MazeGenerator, tile_size: float) 
 		label.font_size = 40
 		label.outline_size = 8
 		label.pixel_size = 0.01
-		label.position.y = 2.2
+		label.position.y = WALL_HEIGHT + 0.4
 		exit_root.add_child(label)
 
 
@@ -123,5 +114,11 @@ static func _multimesh(mesh: Mesh, transforms: Array[Transform3D]) -> MultiMeshI
 	return instance
 
 
-static func _tile_position(tile: Vector2i, tile_size: float, y: float) -> Vector3:
+static func tile_position(tile: Vector2i, tile_size: float, y: float) -> Vector3:
 	return Vector3(tile.x * tile_size, y, tile.y * tile_size)
+
+
+static func _shader_material(shader: Shader) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	return material

@@ -41,7 +41,8 @@ Chaque lancement, et chaque appui sur **R**, génère un nouveau labyrinthe.
 - **Fin de run** : sortie avec la relique (butin + 150 ¢), fuite sans la relique (butin seul) ou
   mort (rien). Les crédits sont sauvegardés entre les runs.
 
-Tous les visuels sont des formes simples en attendant les modèles Blender.
+L'ambiance (murs à panneaux et écrans, sol à circuits, néons, coupe des murs côté caméra) vient
+des shaders. Les personnages et les objets restent des formes simples en attendant les modèles Blender.
 
 ## Structure
 
@@ -57,4 +58,6 @@ scripts/hud.gd            interface
 scripts/input_setup.gd    touches et manette
 scripts/save_data.gd      crédits conservés entre les runs
 scripts/materials.gd      matériaux des placeholders
+scripts/decor.gd          enseignes néon, caisses et terminaux
+shaders/                  murs, sol à circuits, néons, coupe des murs côté caméra
 ```
