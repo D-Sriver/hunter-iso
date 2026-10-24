@@ -94,18 +94,20 @@ def material(name, color=(0.1, 0.1, 0.1), metallic=0.3, roughness=0.6, emission=
 
 def build_materials():
     metal = image_from_array("metal_panels", textures.metal_panels())
-    floor_color, floor_glow = textures.circuit_floor()
     screen_teal = image_from_array("screen_teal", textures.screen(7, NEON_TEAL))
     screen_pink = image_from_array("screen_pink", textures.screen(8, NEON_PINK))
-    material("metal", metallic=0.55, roughness=0.55, texture=metal)
-    material("metal_dark", color=(0.022, 0.027, 0.03), metallic=0.7, roughness=0.45)
-    material("copper", color=(0.25, 0.09, 0.04), metallic=0.9, roughness=0.35)
-    material("coat", color=(0.06, 0.07, 0.09), metallic=0.1, roughness=0.5)
-    material("rubber", color=(0.008, 0.008, 0.01), metallic=0.0, roughness=0.8)
-    material("floor_circuit", metallic=0.4, roughness=0.5,
-             texture=image_from_array("floor_circuit", floor_color),
-             emission_texture=image_from_array("floor_circuit_glow", floor_glow), strength=1.2)
-    material("grating", metallic=0.6, roughness=0.5,
+    material("metal", metallic=0.3, roughness=0.55, texture=metal)
+    material("metal_dark", color=(0.09, 0.08, 0.2), metallic=0.3, roughness=0.5)
+    material("trim_light", color=(0.55, 0.58, 0.85), metallic=0.3, roughness=0.5)
+    material("copper", color=(0.85, 0.4, 0.15), metallic=0.6, roughness=0.35)
+    material("rubber", color=(0.05, 0.04, 0.1), metallic=0.0, roughness=0.8)
+    material("skin", color=(0.95, 0.72, 0.6), metallic=0.0, roughness=0.6)
+    for name, color in (("coat_red", (0.8, 0.1, 0.12)), ("coat_purple", (0.4, 0.15, 0.6)),
+                        ("coat_mustard", (0.85, 0.6, 0.12))):
+        material(name, color=color, metallic=0.0, roughness=0.5)
+    material("floor_tiles", metallic=0.2, roughness=0.4,
+             texture=image_from_array("floor_tiles", textures.floor_tiles()))
+    material("grating", metallic=0.3, roughness=0.5,
              texture=image_from_array("grating", textures.grating()))
     material("crate", metallic=0.1, roughness=0.7,
              texture=image_from_array("crate", textures.crate()))
@@ -480,10 +482,9 @@ def barrel():
 
 # --- Hunters ------------------------------------------------------------------------------------
 
-def hunter(name, accent):
+def hunter(name, accent, coat):
     """Hunter stylisé, environ 1,75 m : long manteau, épaulettes, visière lumineuse.
     L'avant regarde vers -Y."""
-    coat = "coat"
     parts = [
         box((0.16, 0.18, 0.8), (-0.12, 0, 0.4), "rubber", bevel=0.02),
         box((0.16, 0.18, 0.8), (0.12, 0, 0.4), "rubber", bevel=0.02),
@@ -492,14 +493,15 @@ def hunter(name, accent):
         # Pan du manteau : plus large en bas.
         cylinder(0.3, 0.6, (0, 0.02, 0.62), coat, segments=8, top_radius=0.22),
         box((0.46, 0.28, 0.55), (0, 0, 1.18), coat, bevel=0.04),
-        box((0.2, 0.3, 0.12), (-0.3, 0, 1.42), "metal", bevel=0.03),
-        box((0.2, 0.3, 0.12), (0.3, 0, 1.42), "metal", bevel=0.03),
+        box((0.2, 0.3, 0.12), (-0.3, 0, 1.42), "trim_light", bevel=0.03),
+        box((0.2, 0.3, 0.12), (0.3, 0, 1.42), "trim_light", bevel=0.03),
         box((0.12, 0.14, 0.55), (-0.31, 0, 1.1), coat, bevel=0.02),
         box((0.12, 0.14, 0.55), (0.31, 0, 1.1), coat, bevel=0.02),
         box((0.1, 0.12, 0.12), (-0.31, -0.02, 0.78), "rubber"),
         box((0.1, 0.12, 0.12), (0.31, -0.02, 0.78), "rubber"),
         box((0.12, 0.12, 0.1), (0, 0, 1.5), "rubber"),
-        box((0.26, 0.28, 0.28), (0, 0, 1.66), "metal", bevel=0.05),
+        box((0.24, 0.26, 0.26), (0, 0, 1.66), "skin", bevel=0.05),
+        box((0.28, 0.3, 0.12), (0, 0.02, 1.8), "rubber", bevel=0.04),
         box((0.28, 0.04, 0.07), (0, -0.14, 1.68), accent),
         box((0.46, 0.02, 0.04), (0, -0.145, 1.25), accent),
         box((0.04, 0.29, 0.04), (-0.25, 0, 1.47), accent),
@@ -523,7 +525,7 @@ def build_kit():
     reset_scene()
     build_materials()
     pieces = [
-        floor_tile("floor_room", "floor_circuit"),
+        floor_tile("floor_room", "floor_tiles"),
         floor_tile("floor_corridor", "grating"),
         wall_panel(), wall_screens(), wall_pipes(),
         wall_neon("wall_neon_pink", "NEXUS", "neon_pink"),
@@ -531,9 +533,9 @@ def build_kit():
         wall_door(), wall_stub(), wall_post(),
         server_rack(), crate(), crate_stack(), terminal(), desk(), lab_table(), pillar(),
         pedestal(), relic(), exit_pad(), loot_chest(), barrel(),
-        hunter("hunter_player", "neon_teal"),
-        hunter("hunter_rival_red", "neon_pink"),
-        hunter("hunter_rival_gold", "neon_gold"),
+        hunter("hunter_player", "neon_teal", "coat_red"),
+        hunter("hunter_rival_purple", "neon_pink", "coat_purple"),
+        hunter("hunter_rival_gold", "neon_gold", "coat_mustard"),
     ]
     for piece in pieces:
         export(piece)
@@ -556,6 +558,66 @@ def point_light(location, color, energy, radius=0.2):
     obj = bpy.data.objects.new("light", data)
     bpy.context.scene.collection.objects.link(obj)
     obj.location = location
+
+
+def toonify(mat):
+    """Remplace le Principled par un cel-shading à deux tons pour l'aperçu.
+    Les ombres restent colorées (couleur × 0,45) au lieu de tomber au noir, comme en anime."""
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    bsdf = next(node for node in nodes if node.type == "BSDF_PRINCIPLED")
+    output = next(node for node in nodes if node.type == "OUTPUT_MATERIAL")
+    color_input = bsdf.inputs["Base Color"]
+    color_source = color_input.links[0].from_socket if color_input.links else None
+
+    toon = nodes.new("ShaderNodeBsdfToon")
+    toon.component = "DIFFUSE"
+    toon.inputs["Size"].default_value = 0.6
+    toon.inputs["Smooth"].default_value = 0.03
+    ambient = nodes.new("ShaderNodeEmission")
+    ambient.inputs["Strength"].default_value = 0.45
+    for socket in (toon.inputs["Color"], ambient.inputs["Color"]):
+        if color_source is not None:
+            links.new(color_source, socket)
+        else:
+            socket.default_value = color_input.default_value
+    shaded = nodes.new("ShaderNodeAddShader")
+    links.new(toon.outputs[0], shaded.inputs[0])
+    links.new(ambient.outputs[0], shaded.inputs[1])
+
+    glow = nodes.new("ShaderNodeEmission")
+    glow.inputs["Strength"].default_value = bsdf.inputs["Emission Strength"].default_value
+    emission_input = bsdf.inputs["Emission Color"]
+    if emission_input.links:
+        links.new(emission_input.links[0].from_socket, glow.inputs["Color"])
+    else:
+        glow.inputs["Color"].default_value = emission_input.default_value
+    total = nodes.new("ShaderNodeAddShader")
+    links.new(shaded.outputs[0], total.inputs[0])
+    links.new(glow.outputs[0], total.inputs[1])
+    links.new(total.outputs[0], output.inputs["Surface"])
+
+
+def add_bloom(path, threshold=0.8, strength=0.9):
+    """Halo autour des néons, ajouté après le rendu (le compositeur exige un GPU)."""
+    import numpy as np
+    image = bpy.data.images.load(path)
+    width, height = image.size
+    pixels = np.empty(width * height * 4, dtype=np.float32)
+    image.pixels.foreach_get(pixels)
+    pixels = pixels.reshape(height, width, 4)
+    bright = np.clip(pixels[..., :3] - threshold, 0, None)
+    glow = np.zeros_like(bright)
+    for radius in (4, 12, 28):
+        blurred = bright
+        for axis in (0, 1):
+            kernel = np.ones(radius * 2 + 1) / (radius * 2 + 1)
+            blurred = np.apply_along_axis(lambda line: np.convolve(line, kernel, "same"), axis,
+                                          blurred)
+        glow += blurred
+    pixels[..., :3] = np.clip(pixels[..., :3] + glow * strength, 0, 1)
+    image.pixels.foreach_set(pixels.ravel())
+    image.save()
 
 
 def render_preview(kit, path):
@@ -592,15 +654,24 @@ def render_preview(kit, path):
     place(kit, "loot_chest", (0.2, 0.2, 0), 0.5)
     place(kit, "exit_pad", (8.0, 0.0, 0))
     place(kit, "hunter_player", (6.0, 1.2, 0), math.radians(-150))
-    place(kit, "hunter_rival_red", (2.4, 4.6, 0), math.radians(30))
+    place(kit, "hunter_rival_purple", (2.4, 4.6, 0), math.radians(30))
 
-    point_light((1.0, 6.0, 2.4), NEON_PINK, 120)
-    point_light((-1.0, 3.0, 2.2), NEON_TEAL, 90)
-    point_light((5.0, 3.0, 2.0), NEON_TEAL, 70)
-    point_light((3.4, 0.6, 1.8), NEON_TEAL, 25)
-    point_light((5.5, 1.5, 2.2), (0.9, 0.8, 1.0), 40)
+    # Lumière de cel-shading : une lune lavande franche, des néons colorés en complément.
+    sun_data = bpy.data.lights.new("moon", "SUN")
+    sun_data.color = (0.85, 0.82, 1.0)
+    sun_data.energy = 3.0
+    sun_data.angle = 0.05
+    sun = bpy.data.objects.new("moon", sun_data)
+    bpy.context.scene.collection.objects.link(sun)
+    sun.rotation_euler = (math.radians(50), 0, math.radians(-30))
+    point_light((1.0, 6.0, 2.4), NEON_PINK, 150)
+    point_light((-0.5, 3.0, 2.2), NEON_TEAL, 100)
+    point_light((5.0, 3.0, 2.0), NEON_TEAL, 60)
+    point_light((8.0, 6.0, 2.4), (1.0, 0.55, 0.2), 120)
     point_light((8.0, 0.0, 1.0), NEON_GREEN, 40)
-    point_light((5.0, 2.0, 6.0), (0.6, 0.75, 0.9), 250, radius=2.0)
+
+    for mat in MATERIALS.values():
+        toonify(mat)
 
     scene = bpy.context.scene
     world = bpy.data.worlds.new("World")
@@ -608,7 +679,7 @@ def render_preview(kit, path):
         world.use_nodes = True
     except AttributeError:
         pass
-    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.004, 0.005, 0.008, 1)
+    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.03, 0.02, 0.08, 1)
     scene.world = world
 
     camera_data = bpy.data.cameras.new("Camera")
@@ -627,8 +698,34 @@ def render_preview(kit, path):
     scene.cycles.use_denoising = True
     scene.render.resolution_x = 1280
     scene.render.resolution_y = 1000
+    scene.view_settings.view_transform = "Standard"
+    scene.render.use_freestyle = True
+    scene.render.line_thickness = 1.3
+    freestyle = scene.view_layers[0].freestyle_settings
+    lineset = freestyle.linesets[0] if freestyle.linesets else freestyle.linesets.new("contours")
+    if lineset.linestyle is None:
+        lineset.linestyle = bpy.data.linestyles.new("contours")
+    lineset.select_by_visibility = True
+    lineset.select_crease = True
+    lineset.select_silhouette = True
+    lineset.select_border = True
+    lineset.linestyle.color = (0.04, 0.02, 0.1)
+    # Pas de contour sur les néons et écrans : ils sont trop fins, le trait les noierait.
+    lineset.select_by_face_marks = True
+    lineset.face_mark_negation = "EXCLUSIVE"
+    lineset.face_mark_condition = "ONE"
+    for obj in scene.objects:
+        if obj.type != "MESH":
+            continue
+        glowing = [slot.material is not None and slot.material.name.startswith(("neon", "screen", "relic"))
+                   for slot in obj.material_slots]
+        mesh = obj.data
+        marks = mesh.attributes.get("freestyle_face") or mesh.attributes.new(
+            "freestyle_face", "BOOLEAN", "FACE")
+        marks.data.foreach_set("value", [glowing[p.material_index] for p in mesh.polygons])
     scene.render.filepath = path
     bpy.ops.render.render(write_still=True)
+    add_bloom(path)
 
 
 if __name__ == "__main__":

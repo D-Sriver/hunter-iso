@@ -51,116 +51,77 @@ def _disc(size, cx, cy, radius):
 
 
 def metal_panels(seed=1):
-    """Tôle vert-gris en panneaux de 50 cm : joints, rivets, usure et coulures de rouille.
-    La texture couvre 2 m de mur."""
+    """Tôle bleu ardoise façon décor d'anime : aplats, joints nets, liseré clair en haut de chaque
+    panneau et léger dégradé peint. La texture couvre 2 m de mur."""
     rng = _rng(seed)
     image = np.zeros((SIZE, SIZE, 4), dtype=np.float32)
     image[..., 3] = 1.0
-    base = np.array([0.075, 0.1, 0.1])
-    grime = _fractal_noise(rng, SIZE)
-    image[..., :3] = base[None, None, :] * (0.7 + 0.6 * grime[..., None])
+    base = np.array([0.2, 0.22, 0.42])
+    gradient = np.linspace(0.8, 1.1, SIZE)[:, None, None]
+    image[..., :3] = base[None, None, :] * gradient
 
-    # Chaque panneau a une teinte légèrement différente.
     panel = SIZE // 4
     for py in range(4):
         for px in range(4):
-            shade = 0.85 + 0.3 * rng.random()
+            shade = 0.92 + 0.16 * rng.random()
             image[py * panel:(py + 1) * panel, px * panel:(px + 1) * panel, :3] *= shade
 
-    # Rouille : taches rouge-brun là où le bruit est fort, plus fréquentes en bas.
-    rust = _fractal_noise(rng, SIZE, (6, 12, 24))
-    height_bias = np.linspace(0.18, 0.0, SIZE)[:, None]
-    _paint(image, (rust + height_bias > 0.72).astype(float), (0.16, 0.05, 0.035), 0.4)
+    # Quelques panneaux techniques : un aplat plus clair avec une grille d'aération.
+    y, x = np.mgrid[0:SIZE, 0:SIZE]
+    for _ in range(3):
+        px, py = rng.integers(0, 4, 2)
+        inside = ((x // panel == px) & (y // panel == py) & (x % panel > 20) & (x % panel < panel - 20)
+                  & (y % panel > 30) & (y % panel < panel - 30))
+        _paint(image, inside.astype(float), (0.3, 0.33, 0.58))
+        _paint(image, (inside & ((y % 10) < 3)).astype(float), (0.1, 0.1, 0.24))
 
-    # Coulures verticales sous les joints horizontaux.
-    for _ in range(40):
-        x = rng.integers(0, SIZE)
-        top = (rng.integers(1, 4) * panel) - 2
-        length = rng.integers(20, 90)
-        image[max(top - length, 0):top, x:x + 2, :3] *= 0.75
-
-    # Joints entre panneaux.
     seam = np.zeros((SIZE, SIZE))
     for k in range(0, SIZE + 1, panel):
         seam[max(k - 2, 0):k + 2, :] = 1
         seam[:, max(k - 2, 0):k + 2] = 1
-    _paint(image, seam, (0.02, 0.025, 0.03))
-    highlight = np.roll(seam, 3, axis=0) * (1 - seam)
-    _paint(image, highlight, (0.2, 0.24, 0.24), 0.35)
+    highlight = np.roll(seam, -4, axis=0) * (1 - seam)
+    _paint(image, highlight, (0.45, 0.5, 0.8), 0.6)
+    _paint(image, seam, (0.06, 0.05, 0.16))
 
-    # Rivets aux coins des panneaux.
     for py in range(4):
         for px in range(4):
-            for ox, oy in ((10, 10), (panel - 10, 10), (10, panel - 10), (panel - 10, panel - 10)):
-                mask = _disc(SIZE, px * panel + ox, py * panel + oy, 3.2)
-                _paint(image, mask.astype(float), (0.22, 0.25, 0.25))
-
-    # Rayures claires.
-    for _ in range(60):
-        x0, y0 = rng.integers(0, SIZE, 2)
-        length = rng.integers(8, 40)
-        angle = rng.uniform(-0.4, 0.4)
-        for t in range(length):
-            x = int(x0 + t * np.cos(angle)) % SIZE
-            y = int(y0 + t * np.sin(angle)) % SIZE
-            image[y, x, :3] = np.minimum(image[y, x, :3] + 0.08, 1)
+            for ox, oy in ((12, 12), (panel - 12, 12), (12, panel - 12), (panel - 12, panel - 12)):
+                mask = _disc(SIZE, px * panel + ox, py * panel + oy, 3.5)
+                _paint(image, mask.astype(float), (0.4, 0.44, 0.72))
     return np.clip(image, 0, 1)
 
 
-def circuit_floor(seed=2):
-    """Dalles sombres parcourues de pistes de circuit. Rend (couleur, émission).
+def floor_tiles(seed=2):
+    """Dalles de 50 cm gris-bleu, joints sombres, arête claire et marquages peints jaunes.
     La texture couvre une tuile de 2 m."""
     rng = _rng(seed)
-    color = np.zeros((SIZE, SIZE, 4), dtype=np.float32)
-    color[..., 3] = 1.0
-    grime = _fractal_noise(rng, SIZE)
-    color[..., :3] = np.array([0.03, 0.04, 0.042])[None, None, :] * (0.7 + 0.6 * grime[..., None])
+    image = np.zeros((SIZE, SIZE, 4), dtype=np.float32)
+    image[..., 3] = 1.0
+    tile = SIZE // 4
+    y, x = np.mgrid[0:SIZE, 0:SIZE]
+    image[..., :3] = np.array([0.3, 0.31, 0.5])
+    for ty in range(4):
+        for tx in range(4):
+            shade = 0.9 + 0.18 * rng.random()
+            image[ty * tile:(ty + 1) * tile, tx * tile:(tx + 1) * tile, :3] *= shade
 
-    trace = np.zeros((SIZE, SIZE))
-    cell = 16
-    cells = SIZE // cell
-    occupied = np.zeros((cells, cells), dtype=bool)
-    for _ in range(12):
-        cx, cy = rng.integers(1, cells - 1, 2)
-        if occupied[cy, cx]:
-            continue
-        direction = [(1, 0), (-1, 0), (0, 1), (0, -1)][rng.integers(0, 4)]
-        path = [(cx, cy)]
-        for _ in range(rng.integers(6, 22)):
-            if rng.random() < 0.25:
-                dx, dy = direction
-                direction = [(dy, dx), (-dy, -dx)][rng.integers(0, 2)]
-            nx, ny = path[-1][0] + direction[0], path[-1][1] + direction[1]
-            if not (0 < nx < cells - 1 and 0 < ny < cells - 1) or occupied[ny, nx]:
-                break
-            path.append((nx, ny))
-        if len(path) < 4:
-            continue
-        for (ax, ay), (bx, by) in zip(path, path[1:]):
-            occupied[ay, ax] = True
-            x0, x1 = sorted((ax * cell + cell // 2, bx * cell + cell // 2))
-            y0, y1 = sorted((ay * cell + cell // 2, by * cell + cell // 2))
-            trace[y0 - 1:y1 + 2, x0 - 1:x1 + 2] = 1
-        occupied[path[-1][1], path[-1][0]] = True
-        for end in (path[0], path[-1]):
-            ex, ey = end[0] * cell + cell // 2, end[1] * cell + cell // 2
-            trace = np.maximum(trace, _disc(SIZE, ex, ey, 5).astype(float))
-            trace[_disc(SIZE, ex, ey, 2)] = 0.3
+    # Reflet peint en diagonale, typique des sols d'anime.
+    shine = ((x + y) % 180 < 26) & ((x + y) % 180 > 8)
+    _paint(image, shine.astype(float), (0.5, 0.52, 0.78), 0.35)
 
-    # Joints des quatre dalles.
-    seam = np.zeros((SIZE, SIZE))
-    half = SIZE // 2
-    for k in (0, half, SIZE - 1):
-        seam[max(k - 2, 0):k + 3, :] = 1
-        seam[:, max(k - 2, 0):k + 3] = 1
+    local_x, local_y = x % tile, y % tile
+    _paint(image, ((local_x < 3) | (local_y < 3)).astype(float), (0.08, 0.07, 0.2))
+    _paint(image, (((local_x >= 3) & (local_x < 6)) | ((local_y >= 3) & (local_y < 6))).astype(float),
+           (0.55, 0.58, 0.85), 0.5)
 
-    teal = np.array([0.1, 1.0, 0.75])
-    _paint(color, trace, teal * 0.35)
-    _paint(color, seam, (0.008, 0.01, 0.012))
-    emission = np.zeros_like(color)
-    emission[..., 3] = 1.0
-    emission[..., :3] = teal[None, None, :] * trace[..., None] * (1 - seam[..., None])
-    return np.clip(color, 0, 1), np.clip(emission, 0, 1)
+    # Une bande de marquage sur une dalle sur trois environ.
+    for ty in range(4):
+        for tx in range(4):
+            if rng.random() < 0.3:
+                band = ((x // tile == tx) & (y // tile == ty) & (local_y > 52) & (local_y < 76)
+                        & (local_x > 14) & (local_x < tile - 14))
+                _paint(image, band.astype(float), (0.95, 0.72, 0.12), 0.85)
+    return np.clip(image, 0, 1)
 
 
 def grating(seed=3):
@@ -169,12 +130,12 @@ def grating(seed=3):
     image = np.zeros((SIZE, SIZE, 4), dtype=np.float32)
     image[..., 3] = 1.0
     grime = _fractal_noise(rng, SIZE)
-    image[..., :3] = np.array([0.07, 0.08, 0.085])[None, None, :] * (0.6 + 0.8 * grime[..., None])
+    image[..., :3] = np.array([0.18, 0.18, 0.32])[None, None, :] * (0.85 + 0.3 * grime[..., None])
     y, x = np.mgrid[0:SIZE, 0:SIZE]
     slots = ((x % 32) > 4) & ((x % 32) < 28) & ((y % 12) > 3) & ((y % 12) < 9)
-    _paint(image, slots.astype(float), (0.005, 0.006, 0.008))
+    _paint(image, slots.astype(float), (0.04, 0.03, 0.1))
     border = (x < 10) | (x > SIZE - 11) | (y < 10) | (y > SIZE - 11)
-    _paint(image, border.astype(float), (0.11, 0.12, 0.12))
+    _paint(image, border.astype(float), (0.32, 0.33, 0.55))
     return np.clip(image, 0, 1)
 
 
@@ -216,13 +177,13 @@ def crate(seed=4):
     image = np.zeros((size, size, 4), dtype=np.float32)
     image[..., 3] = 1.0
     grime = _fractal_noise(rng, size, (4, 8, 16))
-    image[..., :3] = np.array([0.42, 0.12, 0.03])[None, None, :] * (0.65 + 0.6 * grime[..., None])
+    image[..., :3] = np.array([0.85, 0.32, 0.06])[None, None, :] * (0.85 + 0.25 * grime[..., None])
     y, x = np.mgrid[0:size, 0:size]
-    _paint(image, ((x < 18) | (x > size - 19) | (y < 18) | (y > size - 19)).astype(float), (0.05, 0.04, 0.035))
-    _paint(image, (abs(x - y) < 9).astype(float), (0.05, 0.04, 0.035), 0.9)
-    _paint(image, ((y % 64) < 2).astype(float), (0.12, 0.04, 0.01))
+    _paint(image, ((x < 18) | (x > size - 19) | (y < 18) | (y > size - 19)).astype(float), (0.35, 0.1, 0.05))
+    _paint(image, (abs(x - y) < 9).astype(float), (0.35, 0.1, 0.05), 0.9)
+    _paint(image, ((y % 64) < 2).astype(float), (0.5, 0.16, 0.04))
     stencil = (x > 150) & (x < 220) & (y > 34) & (y < 54) & ((x // 9) % 2 == 0)
-    _paint(image, stencil.astype(float), (0.75, 0.7, 0.6), 0.8)
+    _paint(image, stencil.astype(float), (0.95, 0.9, 0.8), 0.9)
     return np.clip(image, 0, 1)
 
 
@@ -234,7 +195,7 @@ def hazard(seed=5):
     image[..., 3] = 1.0
     y, x = np.mgrid[0:size, 0:size]
     stripes = ((x + y) // 32) % 2 == 0
-    image[..., :3] = np.where(stripes[..., None], [0.7, 0.45, 0.02], [0.02, 0.02, 0.02])
+    image[..., :3] = np.where(stripes[..., None], [0.95, 0.72, 0.05], [0.06, 0.05, 0.12])
     wear = _fractal_noise(rng, size, (8, 16, 32)) > 0.68
-    _paint(image, wear.astype(float), (0.08, 0.08, 0.08), 0.8)
+    _paint(image, wear.astype(float), (0.3, 0.28, 0.3), 0.4)
     return np.clip(image, 0, 1)
