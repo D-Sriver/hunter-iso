@@ -1,8 +1,12 @@
 class_name Player
 extends CharacterBody3D
 ## Le hunter du joueur : déplacement isométrique, dash, attaque qui étourdit.
+## On vise à la souris (ou au stick droit) : le hunter regarde là où l'on vise, son cône de
+## vision et ses coups suivent. Sans visée, il regarde là où il marche.
 
 signal attacked(origin: Vector3, facing: Vector3)
+
+enum Aim { MOVE, MOUSE, STICK }
 
 const SPEED := 6.0
 const CARRY_SPEED_FACTOR := 0.85
@@ -18,12 +22,15 @@ const INVULNERABLE_TIME := 1.2
 const ISO_YAW := PI / 4.0
 const BODY_COLOR := Color(0.15, 0.9, 1.0)
 const MODEL := "hunter_kaz"
+## En dessous de cette distance entre la souris et le hunter, on garde la direction actuelle.
+const MIN_AIM_DISTANCE := 0.4
 
 var max_health := MAX_HEALTH + Implants.bonus_health()
 var health := max_health
 var is_dead := false
 var is_carrying := false
 var facing := Vector3(0, 0, 1)
+var aim_mode := Aim.MOVE
 
 var _dash_timer := 0.0
 var _dash_cooldown := 0.0
@@ -50,13 +57,17 @@ func _physics_process(delta: float) -> void:
 
 	var input := Input.get_vector(&"move_left", &"move_right", &"move_up", &"move_down")
 	var direction := Vector3(input.x, 0.0, input.y).rotated(Vector3.UP, ISO_YAW)
-	if direction.length_squared() > 0.01:
+	var aim := _aim_direction()
+	if aim != Vector3.ZERO:
+		facing = aim
+	elif direction.length_squared() > 0.01:
 		facing = direction.normalized()
 
 	if Input.is_action_just_pressed(&"dash") and _dash_cooldown <= 0.0:
 		_dash_timer = DASH_TIME
 		_dash_cooldown = DASH_COOLDOWN * Implants.dash_cooldown_factor()
-		_dash_direction = facing
+		# On dashe là où l'on court, même en visant ailleurs.
+		_dash_direction = direction.normalized() if direction.length_squared() > 0.01 else facing
 		_animator.trigger(&"dash")
 
 	if Input.is_action_just_pressed(&"attack") and _attack_cooldown <= 0.0:
@@ -71,6 +82,27 @@ func _physics_process(delta: float) -> void:
 	position.y = 0.0
 	rotation.y = atan2(facing.x, facing.z)
 	_animator.update(delta, Vector2(velocity.x, velocity.z).length())
+
+
+## La souris prend la main dès qu'elle bouge, le stick droit dès qu'on le pousse ; le reste de
+## la manette rend la visée à la marche.
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		aim_mode = Aim.MOUSE
+	elif event is InputEventJoypadMotion:
+		var motion := event as InputEventJoypadMotion
+		var is_right_stick := motion.axis in [JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y]
+		if is_right_stick and absf(motion.axis_value) > InputSetup.DEADZONE:
+			aim_mode = Aim.STICK
+		elif not is_right_stick and aim_mode == Aim.MOUSE:
+			aim_mode = Aim.MOVE
+	elif event is InputEventJoypadButton and aim_mode == Aim.MOUSE:
+		aim_mode = Aim.MOVE
+
+
+## Vrai si le joueur vise en ce moment (la caméra se décale alors vers la visée).
+func is_aiming() -> bool:
+	return aim_mode != Aim.MOVE and is_physics_processing() and not is_dead
 
 
 ## Fige le hunter (dialogue, boutique) ou lui rend la main.
@@ -93,6 +125,25 @@ func take_hit() -> bool:
 		_visual.rotation.x = PI / 2.0
 		_visual.position.y = 0.3
 	return true
+
+
+## Direction visée, à plat ; zéro si l'on ne vise pas (ou si la souris est sur le hunter).
+func _aim_direction() -> Vector3:
+	var aim := Vector3.ZERO
+	match aim_mode:
+		Aim.MOUSE:
+			var camera := get_viewport().get_camera_3d() as IsoCamera
+			if camera != null:
+				aim = camera.mouse_ground_point() - global_position
+				aim.y = 0.0
+				if aim.length() < MIN_AIM_DISTANCE:
+					return Vector3.ZERO
+		Aim.STICK:
+			var stick := Input.get_vector(&"aim_left", &"aim_right", &"aim_up", &"aim_down")
+			aim = Vector3(stick.x, 0.0, stick.y).rotated(Vector3.UP, ISO_YAW)
+			if aim.length_squared() < 0.01:
+				return Vector3.ZERO
+	return aim.normalized()
 
 
 func _attack() -> void:
