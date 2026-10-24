@@ -190,3 +190,38 @@ def hazard(seed=5):
     wear = _fractal_noise(rng, size, (8, 16, 32)) > 0.68
     _paint(image, wear.astype(float), (0.3, 0.28, 0.3), 0.4)
     return np.clip(image, 0, 1)
+
+
+def anime_eye(iris, mirrored=False):
+    """Œil d'anime posé sur la peau : blanc en amande, grand iris dégradé coupé par la paupière,
+    trait de cils épais en haut, deux reflets. 128 px, l'image couvre l'œil et un peu de peau."""
+    size = 128
+    image = np.zeros((size, size, 4), dtype=np.float32)
+    image[..., 3] = 1.0
+    y, x = np.mgrid[0:size, 0:size].astype(float)
+    if mirrored:
+        x = size - 1 - x
+    cx, cy = 64.0, 56.0
+
+    def ellipse(ex, ey, rx, ry):
+        return ((x - ex) / rx) ** 2 + ((y - ey) / ry) ** 2 <= 1
+
+    white = ellipse(cx, cy, 44, 34) & (y < cy + 26)
+    _paint(image, white.astype(float), (0.95, 0.94, 1.0))
+    iris_mask = ellipse(cx + 4, cy - 2, 24, 32) & white
+    shade = np.clip((y - (cy - 30)) / 60, 0, 1)[..., None]
+    iris_color = np.array(iris)
+    colored = iris_color * (1.1 - 0.75 * shade)
+    image[..., :3] = np.where(iris_mask[..., None], np.clip(colored, 0, 1), image[..., :3])
+    _paint(image, (ellipse(cx + 4, cy - 2, 11, 16) & white).astype(float), iris_color * 0.15)
+    # Cils : un trait épais qui suit le haut de l'œil et déborde vers l'extérieur.
+    lash = ellipse(cx, cy + 2, 50, 38) & ~ellipse(cx, cy - 4, 46, 34) & (y > cy + 4)
+    lash |= ellipse(cx + 44, cy + 22, 12, 6)
+    _paint(image, lash.astype(float), (0.05, 0.03, 0.1))
+    lower = ellipse(cx, cy, 42, 36) & ~ellipse(cx, cy + 3, 42, 36) & (y < cy - 20) & (x > cx - 10)
+    _paint(image, lower.astype(float), (0.25, 0.12, 0.15), 0.8)
+    _paint(image, (ellipse(cx - 6, cy + 10, 8, 9) & white).astype(float), (1, 1, 1))
+    _paint(image, (ellipse(cx + 14, cy - 18, 4, 4) & white).astype(float), (1, 1, 1))
+    # Hors de l'œil, la plaque est transparente : la peau du visage reste visible.
+    image[..., 3] = (white | lash | lower).astype(np.float32)
+    return np.clip(image, 0, 1)

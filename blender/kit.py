@@ -56,7 +56,7 @@ def image_from_array(name, array):
     height, width = array.shape[:2]
     encoded = array.copy()
     encoded[..., :3] = encoded[..., :3] ** (1 / 2.2)
-    image = bpy.data.images.new(name, width, height, alpha=False)
+    image = bpy.data.images.new(name, width, height, alpha=bool((array[..., 3] < 1).any()))
     image.pixels.foreach_set(encoded.ravel())
     image.filepath_raw = os.path.join(TEXTURE_DIR, name + ".png")
     image.file_format = "PNG"
@@ -81,6 +81,8 @@ def material(name, color=(0.1, 0.1, 0.1), metallic=0.3, roughness=0.6, emission=
         node = nodes.new("ShaderNodeTexImage")
         node.image = texture
         links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
+        if texture.alpha_mode != "NONE" and texture.depth == 32:
+            links.new(node.outputs["Alpha"], bsdf.inputs["Alpha"])
     if emission is not None:
         bsdf.inputs["Emission Color"].default_value = (*emission, 1.0)
         bsdf.inputs["Emission Strength"].default_value = strength
@@ -481,28 +483,33 @@ def barrel():
 
 
 # --- Hunters ------------------------------------------------------------------------------------
-# Personnages façon anime 90's : grandes silhouettes lisibles en vue iso, manteaux et coiffures
-# typés, une arme par hunter. Pose en A (bras légèrement écartés) pour le rig à venir.
+# Personnages façon anime 90's, modelés en volumes lisses : corps et vêtements générés par le
+# modificateur Skin (squelette + rayons) puis subdivisés, tête déformée (crâne large, menton
+# pointu), yeux peints, cheveux en mèches effilées. Pose en A pour le rig à venir.
+# L'avant regarde vers -Y.
+
+HEAD_CENTER = Vector((0.0, 0.0, 1.63))
+HEAD_SIZE = Vector((0.105, 0.115, 0.125))
 
 HUNTERS = [
     {"name": "hunter_kaz", "body": "male", "outfit": "trench", "coat": (0.8, 0.1, 0.12),
-     "pants": (0.08, 0.07, 0.16), "hair": "spiky", "hair_color": (0.06, 0.05, 0.1),
-     "accent": "neon_teal", "weapon": "sword"},
+     "pants": (0.08, 0.07, 0.16), "hair": "spiky", "hair_color": (0.07, 0.06, 0.14),
+     "eyes": (0.9, 0.35, 0.1), "accent": "neon_teal", "weapon": "sword"},
     {"name": "hunter_rook", "body": "big", "outfit": "armor", "coat": (0.85, 0.6, 0.12),
-     "pants": (0.15, 0.13, 0.22), "hair": "buzz", "hair_color": (0.35, 0.18, 0.08),
-     "accent": "neon_gold", "weapon": "hammer"},
+     "pants": (0.15, 0.13, 0.22), "hair": "buzz", "hair_color": (0.45, 0.2, 0.08),
+     "eyes": (0.35, 0.6, 0.2), "accent": "neon_gold", "weapon": "hammer"},
     {"name": "hunter_vex", "body": "male", "outfit": "trench", "coat": (0.4, 0.15, 0.6),
-     "pants": (0.06, 0.05, 0.12), "hair": "swept", "hair_color": (0.9, 0.9, 0.95),
-     "accent": "neon_pink", "weapon": "rifle"},
+     "pants": (0.06, 0.05, 0.12), "hair": "swept", "hair_color": (0.85, 0.87, 0.95),
+     "eyes": (0.8, 0.1, 0.2), "accent": "neon_pink", "weapon": "rifle"},
     {"name": "hunter_nova", "body": "female", "outfit": "bomber", "coat": (0.78, 0.8, 0.9),
      "pants": (0.1, 0.12, 0.3), "hair": "bob", "hair_color": (1.0, 0.3, 0.6),
-     "accent": "neon_teal", "weapon": "pistols"},
+     "eyes": (0.1, 0.75, 0.8), "accent": "neon_teal", "weapon": "pistols"},
     {"name": "hunter_sable", "body": "female", "outfit": "trench", "coat": (0.08, 0.3, 0.25),
-     "pants": (0.05, 0.05, 0.1), "hair": "ponytail", "hair_color": (0.05, 0.04, 0.08),
-     "accent": "neon_gold", "weapon": "scythe"},
+     "pants": (0.05, 0.05, 0.1), "hair": "ponytail", "hair_color": (0.06, 0.05, 0.1),
+     "eyes": (0.95, 0.65, 0.1), "accent": "neon_gold", "weapon": "scythe"},
     {"name": "hunter_mika", "body": "female", "outfit": "bomber", "coat": (0.95, 0.75, 0.1),
      "pants": (0.06, 0.06, 0.14), "hair": "twintails", "hair_color": (0.2, 0.45, 1.0),
-     "accent": "neon_pink", "weapon": "blades"},
+     "eyes": (0.25, 0.4, 1.0), "accent": "neon_pink", "weapon": "blades"},
 ]
 
 
@@ -535,162 +542,334 @@ def limb(start, end, radius_start, radius_end, mat, segments=10, flatten=1.0, ca
     return finish(bm, mat, "world", 1.0, smooth=True)
 
 
-def hunter(spec):
-    """Assemble un hunter d'environ 1,75 m (1,85 m pour le costaud). L'avant regarde vers -Y."""
-    body = spec["body"]
-    female = body == "female"
-    big = body == "big"
+def evaluated_bmesh(obj):
+    """Applique les modificateurs d'un objet et rend le résultat en bmesh (l'objet est supprimé)."""
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph))
+    bpy.data.objects.remove(obj)
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bpy.data.meshes.remove(mesh)
+    return bm
+
+
+def skin_part(joints, edges, mat, subdivisions=2):
+    """Volume organique : `joints` est une liste de (position, rayon x, rayon y)."""
+    mesh = bpy.data.meshes.new("skin")
+    mesh.from_pydata([joint[0] for joint in joints], edges, [])
+    obj = bpy.data.objects.new("skin", mesh)
+    KIT.objects.link(obj)
+    obj.modifiers.new("skin", "SKIN")
+    data = mesh.skin_vertices[0].data
+    for vertex, (_, radius_x, radius_y) in zip(data, joints):
+        vertex.radius = (radius_x, radius_y)
+    data[0].use_root = True
+    subsurf = obj.modifiers.new("subsurf", "SUBSURF")
+    subsurf.levels = subdivisions
+    subsurf.render_levels = subdivisions
+    return finish(evaluated_bmesh(obj), mat, "world", 1.0, smooth=True)
+
+
+def strand(root, control, tip, width, mat, thickness=0.55, sides=6, steps=8):
+    """Mèche de cheveux : tube aplati et effilé le long d'une courbe de Bézier."""
+    root, control, tip = Vector(root), Vector(control), Vector(tip)
+    bm = bmesh.new()
+    rings = []
+    for i in range(steps + 1):
+        t = i / steps
+        position = (1 - t) ** 2 * root + 2 * (1 - t) * t * control + t * t * tip
+        tangent = (2 * (1 - t) * (control - root) + 2 * t * (tip - control)).normalized()
+        radius = width * (1 - t) ** 0.85 + 0.0015
+        side = tangent.cross(Vector((0, 0, 1)))
+        if side.length < 1e-3:
+            side = tangent.cross(Vector((1, 0, 0)))
+        side.normalize()
+        normal = side.cross(tangent).normalized()
+        rings.append([bm.verts.new(position + side * math.cos(a) * radius
+                                   + normal * math.sin(a) * radius * thickness)
+                      for a in (2 * math.pi * k / sides for k in range(sides))])
+    for ring_a, ring_b in zip(rings, rings[1:]):
+        for k in range(sides):
+            bm.faces.new((ring_a[k], ring_a[(k + 1) % sides], ring_b[(k + 1) % sides],
+                          ring_b[k]))
+    bm.faces.new(rings[0])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return finish(bm, mat, "world", 1.0, smooth=True)
+
+
+def head_shape(unit, scale=1.0):
+    """Déforme un point de la sphère unité en tête d'anime : crâne rond, mâchoire étroite,
+    menton pointu vers l'avant et le bas."""
+    x, y, z = unit
+    lower = max(0.0, -z)
+    front = max(0.0, -y)
+    x *= 1 - 0.42 * lower ** 1.4
+    z -= 0.16 * lower * front
+    y -= 0.06 * lower * front
+    if y > 0:
+        y *= 1.08
+    return HEAD_CENTER + Vector((x * HEAD_SIZE.x, y * HEAD_SIZE.y, z * HEAD_SIZE.z)) * scale
+
+
+def head_mesh(scale=1.0, keep=None):
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=28, v_segments=18, radius=1.0)
+    if keep is not None:
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not keep(v.co)], context="VERTS")
+    for vertex in bm.verts:
+        vertex.co = head_shape(vertex.co.copy(), scale)
+    return bm
+
+
+def scalp(azimuth, elevation, lift=1.06):
+    """Point du cuir chevelu : azimut en degrés (0 = devant, 90 = gauche du perso), élévation
+    en degrés au-dessus de l'équateur de la tête."""
+    a, e = math.radians(azimuth), math.radians(elevation)
+    return head_shape(Vector((math.sin(a) * math.cos(e), -math.cos(a) * math.cos(e),
+                              math.sin(e))), lift)
+
+
+def outward(point, amount):
+    direction = point - HEAD_CENTER
+    return direction.normalized() * amount
+
+
+def face_decal(x, z, size, mat, head_tree, tilt=0.0):
+    """Petite plaque posée sur le visage, orientée selon la normale (yeux, sourcils, bouche)."""
+    hit, normal, _, _ = head_tree.ray_cast(Vector((x, -1.0, z)), Vector((0, 1, 0)))
+    bm = bmesh.new()
+    bmesh.ops.create_grid(bm, x_segments=1, y_segments=1, size=0.5,
+                          matrix=Matrix.Rotation(math.pi / 2, 4, "X"))
+    bmesh.ops.scale(bm, vec=Vector((size[0], 1.0, size[1])), verts=bm.verts)
+    bmesh.ops.rotate(bm, cent=Vector(), matrix=Matrix.Rotation(tilt, 3, "Y"), verts=bm.verts)
+    rotation = Vector((0, -1, 0)).rotation_difference(normal).to_matrix()
+    bmesh.ops.rotate(bm, cent=Vector(), matrix=rotation, verts=bm.verts)
+    bmesh.ops.translate(bm, vec=hit + normal * 0.0012, verts=bm.verts)
+    return finish(bm, mat, "face")
+
+
+def head(spec):
+    from mathutils.bvhtree import BVHTree
     name = spec["name"]
+    female = spec["body"] == "female"
+    bm = head_mesh()
+    tree = BVHTree.FromBMesh(bm)
+    parts = [finish(bm, "skin", "world", 1.0, smooth=True)]
+    for side, mirrored in ((-1, True), (1, False)):
+        eye_mat = name + "_eye" + ("_r" if mirrored else "_l")
+        if eye_mat not in MATERIALS:
+            image = image_from_array(eye_mat, textures.anime_eye(spec["eyes"], mirrored))
+            material(eye_mat, metallic=0.0, roughness=0.6, texture=image)
+        size = 0.052 if female else 0.046
+        parts.append(face_decal(side * 0.043, 1.615, (size, size * 0.85), eye_mat, tree))
+        parts.append(face_decal(side * 0.045, 1.655, (0.036, 0.007), paint(name + "_hair",
+                                spec["hair_color"]), tree, tilt=side * (0.12 if female else 0.25)))
+    parts.append(face_decal(0, 1.55, (0.02, 0.005), paint("mouth", (0.35, 0.1, 0.12)), tree))
+    return parts
+
+
+def body(spec):
+    """Corps et vêtements en volumes Skin. Rend la liste des pièces et la position des mains."""
+    name = spec["name"]
+    big = spec["body"] == "big"
+    female = spec["body"] == "female"
     coat = paint(name + "_coat", spec["coat"])
     pants = paint(name + "_pants", spec["pants"])
-    hair = paint(name + "_hair", spec["hair_color"])
-    accent = spec["accent"]
-
-    shoulder = 0.27 if big else 0.2 if female else 0.23
-    waist = 0.15 if big else 0.1 if female else 0.12
-    chest = 0.23 if big else 0.15 if female else 0.18
-    leg_x = 0.11 if big else 0.09
+    shoulder = 0.21 if big else 0.155 if female else 0.175
+    chest = (0.2, 0.13) if big else (0.135, 0.105) if female else (0.16, 0.1)
+    waist = (0.15, 0.1) if big else (0.1, 0.075) if female else (0.115, 0.08)
+    hip_x = 0.1 if big else 0.092 if female else 0.088
+    pelvis = (0.155, 0.1) if big else (0.145, 0.095) if female else (0.13, 0.09)
+    hand_x = shoulder + 0.095
+    bulk = 1.25 if big else 0.95 if female else 1.0
 
     parts = []
-    # Jambes et bottes.
     for side in (-1, 1):
-        x = side * leg_x
-        parts += [
-            limb((x, 0, 0.92), (x, 0, 0.5), 0.09 if big else 0.08, 0.065, pants),
-            sphere((0.13, 0.13, 0.13), (x, 0, 0.5), pants),
-            limb((x, 0, 0.5), (x, 0, 0.14), 0.065, 0.055, pants),
-            limb((x, 0, 0.32), (x, 0, 0.04), 0.068, 0.072, "rubber"),
-            box((0.12, 0.2, 0.08), (x, -0.04, 0.04), "rubber", bevel=0.025),
-        ]
-    parts.append(sphere((2 * leg_x + 0.17, 0.2, 0.2), (0, 0, 0.95), pants))
+        x = side * hip_x
+        parts.append(skin_part([
+            ((0, 0, 0.98), pelvis[0] * 0.8, pelvis[1]), ((x, 0, 0.88), 0.1 * bulk, 0.1 * bulk),
+            ((x * 1.05, -0.01, 0.5), 0.07 * bulk, 0.072 * bulk),
+            ((x * 1.1, 0.01, 0.16), 0.055 * bulk, 0.058 * bulk)],
+            [(0, 1), (1, 2), (2, 3)], pants))
+        parts.append(skin_part([
+            ((x * 1.08, 0.0, 0.36), 0.078 * bulk, 0.08 * bulk),
+            ((x * 1.1, 0.01, 0.1), 0.07 * bulk, 0.074 * bulk),
+            ((x * 1.1, -0.12, 0.045), 0.058 * bulk, 0.05 * bulk)], [(0, 1), (1, 2)], "rubber"))
 
-    # Torse, cou, tête.
-    parts += [
-        limb((0, 0, 0.92), (0, 0, 1.42), waist, chest, pants, flatten=0.7),
-        limb((0, 0, 1.4), (0, 0, 1.54), 0.045, 0.045, "skin"),
-        sphere((0.22, 0.23, 0.26), (0, 0, 1.65), "skin"),
-        sphere((0.13, 0.12, 0.1), (0, -0.045, 1.55), "skin"),
+    puff = 0.02 if spec["outfit"] == "bomber" else 0.0
+    torso = coat if spec["outfit"] != "armor" else "metal_dark"
+    joints = [((0, 0, 0.98), pelvis[0] + puff, pelvis[1] + puff),
+              ((0, 0, 1.1), waist[0] + puff, waist[1] + puff),
+              ((0, 0.0, 1.3), chest[0] + puff, chest[1] + puff),
+              ((0, 0, 1.45), 0.07, 0.065)]
+    edges = [(0, 1), (1, 2), (2, 3)]
+    for side in (-1, 1):
+        base = len(joints)
+        arm = [0.078 * bulk + puff, 0.062 * bulk + puff, 0.054 * bulk + puff]
+        joints += [((side * shoulder, 0, 1.41), arm[0], arm[0]),
+                   ((side * (shoulder + 0.055), 0.02, 1.15), arm[1], arm[1]),
+                   ((side * (shoulder + 0.085), -0.01, 0.92), arm[2], arm[2])]
+        edges += [(3, base), (base, base + 1), (base + 1, base + 2)]
+    parts.append(skin_part(joints, edges, torso))
+    parts.append(skin_part([((0, 0, 1.42), 0.042, 0.042), ((0, 0.005, 1.56), 0.04, 0.04)],
+                           [(0, 1)], "skin"))
+    for side in (-1, 1):
+        parts.append(skin_part([
+            ((side * (shoulder + 0.087), -0.012, 0.9), 0.05 * bulk, 0.042 * bulk),
+            ((side * hand_x, -0.02, 0.82), 0.058 * bulk, 0.036 * bulk)], [(0, 1)], "rubber"))
+    return parts, hand_x, chest, waist, shoulder, pelvis
+
+
+def outfit(spec, chest, waist, shoulder, pelvis):
+    name = spec["name"]
+    coat = paint(name + "_coat", spec["coat"])
+    accent = spec["accent"]
+    style = spec["outfit"]
+    parts = [
+        limb((0, 0, 1.02), (0, 0, 1.06), waist[0] + 0.02, waist[0] + 0.02, "rubber", segments=20,
+             flatten=waist[1] / waist[0] + 0.05),
+        box((0.05, 0.01, 0.035), (0, -waist[1] - 0.025, 1.04), accent),
     ]
-    # Grands yeux d'anime : un ovale sombre et un reflet clair.
-    for side in (-1, 1):
-        parts += [
-            sphere((0.032, 0.02, 0.046), (side * 0.048, -0.102, 1.64), paint("eye", (0.08, 0.05, 0.2))),
-            sphere((0.015, 0.01, 0.015), (side * 0.045, -0.111, 1.66), "trim_light"),
-        ]
-    if female:
-        parts.append(sphere((0.24, 0.13, 0.11), (0, -0.07, 1.27), coat))
-
-    # Bras en pose A, manches de la couleur du manteau, gants.
-    for side in (-1, 1):
-        s = (side * shoulder, 0, 1.38)
-        e = (side * (shoulder + 0.07), 0.01, 1.1)
-        h = (side * (shoulder + 0.1), -0.02, 0.86)
-        parts += [
-            sphere((0.15, 0.15, 0.15), s, coat),
-            limb(s, e, 0.06 if big else 0.052, 0.045, coat),
-            sphere((0.1, 0.1, 0.1), e, coat),
-            limb(e, h, 0.045, 0.04, coat),
-            sphere((0.1, 0.11, 0.12), h, "rubber"),
-        ]
-
-    parts += outfit(spec["outfit"], coat, accent, waist, chest, shoulder)
-    parts += hairstyle(spec["hair"], hair)
-    parts += weapon(spec["weapon"], accent, shoulder + 0.1)
-
-    obj = join(name, parts)
-    if big:
-        obj.scale = (1.06, 1.06, 1.06)
-    elif female:
-        obj.scale = (0.97, 0.97, 0.97)
-    return obj
-
-
-def outfit(style, coat, accent, waist, chest, shoulder):
-    parts = [limb((0, 0, 0.93), (0, 0, 0.97), waist + 0.025, waist + 0.025, accent, segments=16,
-                  flatten=0.72)]
     if style == "trench":
         parts += [
-            limb((0, 0, 0.98), (0, 0, 1.43), waist + 0.02, chest + 0.02, coat, flatten=0.72),
-            # Pans du manteau, ouverts en bas, qui descendent sous le genou.
-            limb((0, 0.01, 1.0), (0, 0.04, 0.4), waist + 0.04, 0.3, coat, segments=12,
-                 flatten=0.75, caps=False),
-            limb((0, 0.04, 0.42), (0, 0.04, 0.4), 0.305, 0.305, accent, segments=12,
-                 flatten=0.76, caps=False),
-            # Col montant.
-            limb((0, 0.03, 1.38), (0, 0.05, 1.52), 0.11, 0.14, coat, segments=12, caps=False),
+            # Pans du manteau, ouverts en bas, plus longs derrière.
+            limb((0, 0.005, 1.03), (0, 0.04, 0.4), pelvis[0] + 0.03, 0.29, coat, segments=20,
+                 flatten=0.88, caps=False),
+            limb((0, 0.04, 0.415), (0, 0.04, 0.4), 0.293, 0.293, accent, segments=20,
+                 flatten=0.89, caps=False),
+            # Col montant largement ouvert.
+            limb((0, 0.02, 1.4), (0, 0.04, 1.54), 0.085, 0.12, coat, segments=16, flatten=0.9,
+                 caps=False),
         ]
     elif style == "bomber":
         parts += [
-            limb((0, 0, 0.9), (0, 0, 1.44), waist + 0.05, chest + 0.04, coat, flatten=0.75),
-            limb((0, 0, 0.88), (0, 0, 0.94), waist + 0.055, waist + 0.055, "rubber",
-                 flatten=0.76),
-            sphere((0.3, 0.24, 0.12), (0, 0.02, 1.45), coat),
-            box((0.02, 0.01, 0.4), (0, -(chest + 0.04) * 0.75 - 0.01, 1.15), accent),
+            limb((0, 0, 0.93), (0, 0, 0.98), waist[0] + 0.04, waist[0] + 0.04, "rubber",
+                 segments=20, flatten=0.8),
+            sphere((0.26, 0.21, 0.09), (0, 0.02, 1.45), coat, segments=18),
+            box((0.012, 0.008, 0.4), (0, -(chest[1] + 0.02) - 0.005, 1.17), accent),
         ]
     else:
         parts += [
-            limb((0, 0, 0.98), (0, 0, 1.44), waist + 0.03, chest + 0.03, "metal_dark",
-                 flatten=0.75),
-            box((0.42, 0.12, 0.34), (0, -0.14, 1.24), coat, bevel=0.04),
-            box((0.2, 0.01, 0.03), (0, -0.205, 1.3), accent),
-            limb((0, 0, 0.96), (0, 0.02, 0.6), waist + 0.05, 0.26, coat, segments=8,
+            box((0.4, 0.14, 0.32), (0, -0.07, 1.25), coat, bevel=0.05),
+            box((0.18, 0.01, 0.025), (0, -0.145, 1.3), accent),
+            limb((0, 0, 1.0), (0, 0.02, 0.62), waist[0] + 0.05, 0.25, coat, segments=12,
                  flatten=0.8, caps=False),
         ]
-    # Épaulettes surdimensionnées : la signature des héros d'anime de l'époque.
-    pad = 0.24 if style == "armor" else 0.17
+    # Épaulettes arrondies : la signature des héros d'anime de l'époque.
+    pad = 0.2 if style == "armor" else 0.13
     for side in (-1, 1):
-        parts.append(box((pad, pad + 0.04, 0.09), (side * (shoulder + 0.02), 0, 1.46),
-                         coat if style != "trench" else "trim_light", bevel=0.03,
-                         rotation=(0, side * -0.3, 0)))
-        parts.append(box((0.03, pad + 0.05, 0.02), (side * (shoulder + 0.09), 0, 1.44), accent,
-                         rotation=(0, side * -0.3, 0)))
+        parts.append(sphere((pad, pad + 0.04, 0.09), (side * (shoulder + 0.02), 0, 1.47),
+                            coat, segments=16,
+                            rotation=(0, side * -0.35, 0)))
+        parts.append(box((0.025, pad, 0.015), (side * (shoulder + 0.07), 0, 1.46), accent,
+                         rotation=(0, side * -0.35, 0)))
     return parts
 
 
-def spike(base, tip, radius, mat):
-    return limb(base, tip, radius, 0.004, mat, segments=6)
+def bangs(hair, count, spread, length, sweep=0.0, width=0.034):
+    parts = []
+    for i in range(count):
+        azimuth = -spread + 2 * spread * i / max(count - 1, 1)
+        root = scalp(azimuth, 52)
+        tip = root + Vector((azimuth / 900 + sweep, -0.035, -length))
+        control = root + Vector((0, -0.05, -length * 0.3))
+        parts.append(strand(root, control, tip, width, hair))
+    return parts
 
 
-def hairstyle(style, hair):
-    top = 1.67
+def hairstyle(spec):
+    hair = paint(spec["name"] + "_hair", spec["hair_color"])
+    style = spec["hair"]
     if style == "buzz":
-        return [sphere((0.215, 0.225, 0.17), (0, 0.01, top + 0.04), hair)]
-    if style == "bob":
-        return [
-            sphere((0.27, 0.27, 0.26), (0, 0.04, top + 0.02), hair),
-            box((0.21, 0.05, 0.07), (0, -0.095, top + 0.07), hair, bevel=0.02),
-        ]
-    parts = [sphere((0.24, 0.25, 0.21), (0, 0.01, top + 0.04), hair)]
-    # Frange en mèches pointues : c'est elle qui donne la tête "anime".
-    for x in (-0.07, 0.0, 0.07):
-        parts.append(spike((x, -0.06, top + 0.11), (x * 1.3, -0.125, top + 0.0), 0.045, hair))
+        cap = head_mesh(1.04, keep=lambda co: co.z > 0.25 or (co.y > -0.2 and co.z > -0.2))
+        parts = [finish(cap, hair, "world", 1.0, smooth=True)]
+        for azimuth in range(-40, 50, 20):
+            root = scalp(azimuth, 62, 1.02)
+            parts.append(strand(root, root + Vector((0, -0.02, 0.02)),
+                                root + Vector((0, -0.04, 0.025)), 0.03, hair))
+        return parts
+
+    cap = head_mesh(1.07, keep=lambda co: co.z > 0.4 or (co.y > -0.15 and co.z > -0.55)
+                    or (abs(co.x) > 0.8 and co.z > -0.3))
+    parts = [finish(cap, hair, "world", 1.0, smooth=True)]
+    up = Vector((0, 0, 1))
     if style == "spiky":
-        for tip in ((0, -0.12, 1.83), (0.12, -0.05, 1.86), (-0.12, -0.05, 1.86),
-                    (0.06, 0.12, 1.9), (-0.06, 0.12, 1.9), (0.18, 0.1, 1.74),
-                    (-0.18, 0.1, 1.74), (0, 0.2, 1.72), (0.1, -0.13, 1.66), (-0.1, -0.13, 1.66)):
-            parts.append(spike((tip[0] * 0.3, tip[1] * 0.3, top + 0.06), tip, 0.06, hair))
-    elif style == "swept":
-        for x in (-0.09, -0.03, 0.03, 0.09):
-            parts.append(spike((x, -0.08, top + 0.1), (x * 1.6, 0.24, top - 0.06), 0.055, hair))
-        parts.append(spike((0.05, -0.1, top + 0.08), (0.11, -0.13, top - 0.08), 0.035, hair))
-    elif style == "ponytail":
-        parts += [
-            sphere((0.08, 0.08, 0.08), (0, 0.11, top + 0.08), "rubber"),
-            limb((0, 0.12, top + 0.08), (0, 0.22, top - 0.15), 0.06, 0.05, hair),
-            limb((0, 0.22, top - 0.15), (0, 0.24, top - 0.55), 0.05, 0.01, hair),
-            box((0.2, 0.05, 0.06), (0, -0.1, top + 0.08), hair, bevel=0.02),
-        ]
-    elif style == "twintails":
-        parts.append(box((0.21, 0.05, 0.07), (0, -0.1, top + 0.08), hair, bevel=0.02))
+        # Pics rejetés vers l'arrière, plus longs derrière, aucun vers le visage.
+        for azimuth in range(60, 310, 25):
+            for elevation in (30, 60):
+                root = scalp(azimuth + elevation / 3, elevation)
+                back = 0.5 + 0.5 * -math.cos(math.radians(azimuth))
+                tip = root + outward(root, 0.06 + 0.06 * back) + up * 0.02 + Vector((0, 0.07, 0))
+                parts.append(strand(root, root + outward(root, 0.05), tip, 0.05, hair))
+        for azimuth in (-30, 0, 30):
+            root = scalp(azimuth, 75)
+            parts.append(strand(root, root + up * 0.06, root + up * 0.1 + Vector((0, 0.1, 0)),
+                                0.05, hair))
+        parts += bangs(hair, 5, 40, 0.11)
         for side in (-1, 1):
-            base = (side * 0.12, 0.04, top + 0.08)
-            middle = (side * 0.22, 0.07, top - 0.1)
-            parts += [
-                sphere((0.06, 0.06, 0.06), base, "neon_pink"),
-                limb(base, middle, 0.05, 0.055, hair),
-                limb(middle, (side * 0.24, 0.1, top - 0.5), 0.055, 0.01, hair),
-            ]
+            root = scalp(side * 75, 25)
+            parts.append(strand(root, root + Vector((side * 0.01, -0.02, -0.06)),
+                                root + Vector((side * 0.0, -0.03, -0.14)), 0.03, hair))
+    elif style == "swept":
+        for azimuth in range(-60, 70, 20):
+            root = scalp(azimuth, 50)
+            parts.append(strand(root, root + Vector((azimuth / 600, 0.04, 0.09)),
+                                root + Vector((azimuth / 350, 0.24, -0.06)), 0.045, hair))
+        for azimuth in range(100, 270, 25):
+            root = scalp(azimuth, 20)
+            parts.append(strand(root, root + outward(root, 0.04),
+                                root + outward(root, 0.03) + Vector((0, 0.04, -0.16)), 0.04,
+                                hair))
+        root = scalp(-15, 55)
+        parts.append(strand(root, root + Vector((-0.02, -0.05, -0.05)),
+                            root + Vector((-0.05, -0.03, -0.19)), 0.03, hair))
+    elif style == "bob":
+        for azimuth in range(40, 330, 18):
+            root = scalp(azimuth, 30)
+            parts.append(strand(root, root + outward(root, 0.04),
+                                root + outward(root, 0.035) + Vector((0, 0, -0.17)), 0.05,
+                                hair))
+        parts += bangs(hair, 7, 45, 0.085, width=0.03)
+    elif style == "ponytail":
+        parts += bangs(hair, 5, 40, 0.12, sweep=0.02)
+        tie = scalp(180, 35, 1.1)
+        parts.append(sphere((0.05, 0.05, 0.05), tie, "neon_gold"))
+        for k in range(6):
+            angle = k * math.pi / 3
+            offset = Vector((math.cos(angle) * 0.02, math.sin(angle) * 0.015, 0))
+            parts.append(strand(tie + offset, tie + offset + Vector((0, 0.12, -0.08)),
+                                tie + offset * 2 + Vector((0, 0.1, -0.55)), 0.04, hair))
+        for side in (-1, 1):
+            root = scalp(side * 70, 30)
+            parts.append(strand(root, root + Vector((0, -0.02, -0.08)),
+                                root + Vector((0, -0.02, -0.18)), 0.025, hair))
+    elif style == "twintails":
+        parts += bangs(hair, 6, 45, 0.1)
+        for side in (-1, 1):
+            tie = scalp(side * 105, 40, 1.1)
+            parts.append(sphere((0.05, 0.05, 0.05), tie, "neon_pink"))
+            for k in range(5):
+                angle = k * 2 * math.pi / 5
+                offset = Vector((math.cos(angle) * 0.02, math.sin(angle) * 0.02, 0))
+                parts.append(strand(tie + offset, tie + offset + Vector((side * 0.12, 0, 0.02)),
+                                    tie + offset * 2 + Vector((side * 0.16, 0.04, -0.5)), 0.04,
+                                    hair))
     return parts
+
+
+def hunter(spec):
+    """Assemble un hunter d'environ 1,75 m (1,85 m pour le costaud)."""
+    parts, hand_x, chest, waist, shoulder, pelvis = body(spec)
+    parts += head(spec)
+    parts += outfit(spec, chest, waist, shoulder, pelvis)
+    parts += hairstyle(spec)
+    parts += weapon(spec["weapon"], spec["accent"], hand_x)
+    obj = join(spec["name"], parts)
+    if spec["body"] == "big":
+        obj.scale = (1.06, 1.06, 1.06)
+    elif spec["body"] == "female":
+        obj.scale = (0.96, 0.96, 0.96)
+    return obj
 
 
 def weapon(kind, accent, hand_x):
@@ -828,10 +1007,17 @@ def toonify(mat):
     total = nodes.new("ShaderNodeAddShader")
     links.new(shaded.outputs[0], total.inputs[0])
     links.new(glow.outputs[0], total.inputs[1])
+    alpha_input = bsdf.inputs["Alpha"]
+    if alpha_input.links:
+        cutout = nodes.new("ShaderNodeMixShader")
+        links.new(alpha_input.links[0].from_socket, cutout.inputs["Fac"])
+        links.new(nodes.new("ShaderNodeBsdfTransparent").outputs[0], cutout.inputs[1])
+        links.new(total.outputs[0], cutout.inputs[2])
+        total = cutout
     links.new(total.outputs[0], output.inputs["Surface"])
 
 
-def add_bloom(path, threshold=0.92, strength=0.9):
+def add_bloom(path, threshold=0.88, strength=1.2):
     """Halo autour des néons, ajouté après le rendu (le compositeur exige un GPU)."""
     import numpy as np
     image = bpy.data.images.load(path)
@@ -839,7 +1025,9 @@ def add_bloom(path, threshold=0.92, strength=0.9):
     pixels = np.empty(width * height * 4, dtype=np.float32)
     image.pixels.foreach_get(pixels)
     pixels = pixels.reshape(height, width, 4)
-    bright = np.clip(pixels[..., :3] - threshold, 0, None)
+    # Seules les couleurs vives et saturées (néons) bavent ; le blanc d'un vêtement non.
+    saturation = pixels[..., :3].max(axis=2) - pixels[..., :3].min(axis=2)
+    bright = np.clip(pixels[..., :3] - threshold, 0, None) * np.clip(saturation * 2, 0, 1)[..., None]
     glow = np.zeros_like(bright)
     for radius in (4, 12, 28):
         blurred = bright
@@ -909,10 +1097,21 @@ def render_lineup(kit, path):
         place(kit, spec["name"], row * (i - 2.5) * 1.25, azimuth - math.radians(15))
     point_light((-3.0, -2.0, 2.5), NEON_PINK, 120)
     point_light((3.0, -2.0, 2.5), NEON_TEAL, 120)
-    shoot(path, Vector((0.0, 0.0, 0.95)), 7.8, (1600, 900), azimuth=20)
+    shoot(path, Vector((0.0, 0.0, 0.95)), 7.2, (1600, 900), azimuth=20)
 
 
-def shoot(path, target, ortho_scale, resolution, azimuth=45):
+def render_portrait(kit, path):
+    """Gros plan sur les visages de Kaz et Nova, pour juger les têtes et les coiffures."""
+    KIT.hide_render = True
+    place(kit, "floor_room", (0, 0, 0))
+    place(kit, "hunter_kaz", (-0.22, 0, 0), math.radians(-10))
+    place(kit, "hunter_nova", (0.25, 0.05, 0), math.radians(12))
+    point_light((-1.0, -1.0, 2.0), NEON_PINK, 12)
+    point_light((1.0, -1.0, 2.0), NEON_TEAL, 12)
+    shoot(path, Vector((0.0, 0.0, 1.5)), 1.1, (1200, 800), azimuth=0, elevation=78)
+
+
+def shoot(path, target, ortho_scale, resolution, azimuth=45, elevation=57):
     """Rend la scène en cel-shading : lune lavande, contours sombres, halo sur les néons."""
     sun_data = bpy.data.lights.new("moon", "SUN")
     sun_data.color = (0.85, 0.82, 1.0)
@@ -939,7 +1138,7 @@ def shoot(path, target, ortho_scale, resolution, azimuth=45):
     camera_data.ortho_scale = ortho_scale
     camera = bpy.data.objects.new("Camera", camera_data)
     scene.collection.objects.link(camera)
-    camera.rotation_euler = (math.radians(57), 0, math.radians(azimuth))
+    camera.rotation_euler = (math.radians(elevation), 0, math.radians(azimuth))
     forward = camera.rotation_euler.to_matrix() @ Vector((0, 0, -1))
     camera.location = target - forward * 40
     scene.camera = camera
@@ -968,8 +1167,9 @@ def shoot(path, target, ortho_scale, resolution, azimuth=45):
         if obj.type != "MESH":
             continue
         # Ni sur les sols : chaque tuile tracerait un quadrillage épais.
-        glowing = [slot.material is not None and slot.material.name.startswith(
-            ("neon", "screen", "relic", "floor", "grating", "eye")) for slot in obj.material_slots]
+        glowing = [slot.material is not None and (slot.material.name.startswith(
+            ("neon", "screen", "relic", "floor", "grating", "mouth")) or "_eye" in slot.material.name
+           ) for slot in obj.material_slots]
         mesh = obj.data
         marks = mesh.attributes.get("freestyle_face") or mesh.attributes.new(
             "freestyle_face", "BOOLEAN", "FACE")
@@ -983,5 +1183,7 @@ if __name__ == "__main__":
     kit_objects = build_kit()
     if "--preview" in sys.argv:
         render_preview(kit_objects, os.path.join(KIT_DIR, "preview.png"))
+    elif "--portrait" in sys.argv:
+        render_portrait(kit_objects, os.path.join(KIT_DIR, "portrait.png"))
     elif "--lineup" in sys.argv:
         render_lineup(kit_objects, os.path.join(KIT_DIR, "hunters.png"))
