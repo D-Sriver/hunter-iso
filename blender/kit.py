@@ -237,14 +237,15 @@ def floor_tile(name, mat):
 def wall_shell(width=TILE):
     half = WALL_THICKNESS / 2
     parts = [
-        box((width, WALL_THICKNESS, WALL_HEIGHT), (0, 0, WALL_HEIGHT / 2), "metal"),
+        # Le corps du mur s'arrête sous la corniche : deux dessus au même niveau scintilleraient.
+        box((width, WALL_THICKNESS, WALL_HEIGHT - 0.04), (0, 0, WALL_HEIGHT / 2 - 0.02), "metal"),
         box((width, WALL_THICKNESS + 0.08, 0.25), (0, 0, 0.125), "metal_dark", bevel=0.015),
         box((width, WALL_THICKNESS + 0.12, 0.18), (0, 0, WALL_HEIGHT - 0.09), "metal_dark",
             bevel=0.015),
     ]
     for x in (-width / 2 + 0.06, width / 2 - 0.06):
-        parts.append(box((0.12, WALL_THICKNESS + 0.1, WALL_HEIGHT), (x, 0, WALL_HEIGHT / 2),
-                         "metal_dark", bevel=0.015))
+        parts.append(box((0.12, WALL_THICKNESS + 0.1, WALL_HEIGHT - 0.06),
+                         (x, 0, WALL_HEIGHT / 2 - 0.03), "metal_dark", bevel=0.015))
     parts += both_faces(lambda side: [
         box((width - 0.2, 0.03, 0.04), (0, side * (half + 0.015), WALL_HEIGHT - 0.3), "neon_teal"),
     ])
@@ -314,13 +315,14 @@ def wall_door():
     for direction in (-1, 1):
         x = direction * (TILE / 2 - side_width / 2)
         parts += [
-            box((side_width, WALL_THICKNESS, WALL_HEIGHT), (x, 0, WALL_HEIGHT / 2), "metal"),
+            box((side_width, WALL_THICKNESS, WALL_HEIGHT - 0.04), (x, 0, WALL_HEIGHT / 2 - 0.02),
+                "metal"),
             box((side_width, WALL_THICKNESS + 0.08, 0.25), (x, 0, 0.125), "metal_dark"),
             box((0.07, WALL_THICKNESS + 0.06, 2.4), (direction * opening / 2, 0, 1.2), "hazard",
                 uv="face"),
         ]
     parts += [
-        box((TILE, WALL_THICKNESS, 0.6), (0, 0, WALL_HEIGHT - 0.3), "metal"),
+        box((TILE, WALL_THICKNESS, 0.56), (0, 0, WALL_HEIGHT - 0.32), "metal"),
         box((opening, WALL_THICKNESS + 0.06, 0.07), (0, 0, 2.4), "hazard", uv="face"),
         box((TILE, WALL_THICKNESS + 0.12, 0.18), (0, 0, WALL_HEIGHT - 0.09), "metal_dark"),
     ]
@@ -346,7 +348,8 @@ def wall_stub():
 def wall_post():
     """Poteau d'angle, posé aux coins pour cacher les jonctions entre murs."""
     return join("wall_post", [
-        box((0.42, 0.42, WALL_HEIGHT), (0, 0, WALL_HEIGHT / 2), "metal_dark", bevel=0.03),
+        box((0.42, 0.42, WALL_HEIGHT + 0.08), (0, 0, WALL_HEIGHT / 2 + 0.04), "metal_dark",
+            bevel=0.03),
         box((0.46, 0.46, 0.05), (0, 0, WALL_HEIGHT - 0.3), "neon_teal"),
     ])
 
