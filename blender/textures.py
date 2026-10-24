@@ -92,35 +92,26 @@ def metal_panels(seed=1):
 
 
 def floor_tiles(seed=2):
-    """Dalles de 50 cm gris-bleu, joints sombres, arête claire et marquages peints jaunes.
+    """Grandes dalles d'un mètre, indigo moyen, joints fins et quelques variations de ton peintes.
     La texture couvre une tuile de 2 m."""
     rng = _rng(seed)
     image = np.zeros((SIZE, SIZE, 4), dtype=np.float32)
     image[..., 3] = 1.0
-    tile = SIZE // 4
+    tile = SIZE // 2
     y, x = np.mgrid[0:SIZE, 0:SIZE]
-    image[..., :3] = np.array([0.3, 0.31, 0.5])
-    for ty in range(4):
-        for tx in range(4):
-            shade = 0.9 + 0.18 * rng.random()
+    image[..., :3] = np.array([0.17, 0.16, 0.33])
+    for ty in range(2):
+        for tx in range(2):
+            shade = 0.95 + 0.1 * rng.random()
             image[ty * tile:(ty + 1) * tile, tx * tile:(tx + 1) * tile, :3] *= shade
 
-    # Reflet peint en diagonale, typique des sols d'anime.
-    shine = ((x + y) % 180 < 26) & ((x + y) % 180 > 8)
-    _paint(image, shine.astype(float), (0.5, 0.52, 0.78), 0.35)
+    # Taches de ton très douces, comme un fond peint à la main.
+    wash = _fractal_noise(rng, SIZE, (3, 6))
+    image[..., :3] *= (0.94 + 0.12 * wash)[..., None]
 
     local_x, local_y = x % tile, y % tile
-    _paint(image, ((local_x < 3) | (local_y < 3)).astype(float), (0.08, 0.07, 0.2))
-    _paint(image, (((local_x >= 3) & (local_x < 6)) | ((local_y >= 3) & (local_y < 6))).astype(float),
-           (0.55, 0.58, 0.85), 0.5)
-
-    # Une bande de marquage sur une dalle sur trois environ.
-    for ty in range(4):
-        for tx in range(4):
-            if rng.random() < 0.3:
-                band = ((x // tile == tx) & (y // tile == ty) & (local_y > 52) & (local_y < 76)
-                        & (local_x > 14) & (local_x < tile - 14))
-                _paint(image, band.astype(float), (0.95, 0.72, 0.12), 0.85)
+    seam = (local_x < 2) | (local_x > tile - 3) | (local_y < 2) | (local_y > tile - 3)
+    _paint(image, seam.astype(float), (0.09, 0.08, 0.2))
     return np.clip(image, 0, 1)
 
 

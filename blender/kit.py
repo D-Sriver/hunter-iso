@@ -105,7 +105,7 @@ def build_materials():
     for name, color in (("coat_red", (0.8, 0.1, 0.12)), ("coat_purple", (0.4, 0.15, 0.6)),
                         ("coat_mustard", (0.85, 0.6, 0.12))):
         material(name, color=color, metallic=0.0, roughness=0.5)
-    material("floor_tiles", metallic=0.2, roughness=0.4,
+    material("floor_tiles", metallic=0.1, roughness=0.3,
              texture=image_from_array("floor_tiles", textures.floor_tiles()))
     material("grating", metallic=0.3, roughness=0.5,
              texture=image_from_array("grating", textures.grating()))
@@ -717,8 +717,9 @@ def render_preview(kit, path):
     for obj in scene.objects:
         if obj.type != "MESH":
             continue
-        glowing = [slot.material is not None and slot.material.name.startswith(("neon", "screen", "relic"))
-                   for slot in obj.material_slots]
+        # Ni sur les sols : chaque tuile tracerait un quadrillage épais.
+        glowing = [slot.material is not None and slot.material.name.startswith(
+            ("neon", "screen", "relic", "floor", "grating")) for slot in obj.material_slots]
         mesh = obj.data
         marks = mesh.attributes.get("freestyle_face") or mesh.attributes.new(
             "freestyle_face", "BOOLEAN", "FACE")
