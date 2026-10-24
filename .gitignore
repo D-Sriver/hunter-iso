@@ -1,0 +1,11 @@
+# Godot 4
+.godot/
+/android/
+
+# Exports
+/build/
+*.exe
+*.pck
+
+# Blender
+*.blend1
