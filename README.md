@@ -46,6 +46,8 @@ Les rendus vont dans `docs/renders/`.
 - `scripts/relic_lines.gd` : les répliques de la relique qui parle.
 - `scripts/implants.gd`, `scripts/save_data.gd` : implants achetés et progression sauvegardée.
 - `scripts/main.gd` : déroulé d'une run (relique, alerte, coffres, sorties).
+- `scripts/fog_of_war.gd`, `shaders/fog_of_war.gdshader` : cône de vision et brouillard de guerre
+  (noir = jamais vu, voile gris = déjà vu, rivaux cachés hors du champ).
 - `scripts/level_generator.gd` : plan du niveau en salles reliées par des couloirs.
 - `scripts/level_builder.gd`, `scripts/decor.gd` : pose les pièces du kit sur ce plan.
 - `scripts/kit.gd` : charge les `.glb` et leur applique le rendu anime (ombrage en deux tons,

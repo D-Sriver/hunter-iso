@@ -49,6 +49,7 @@ var _beacon_timer := 0.0
 var _camera: IsoCamera
 var _end_timer := 0.0
 var _hud: Hud
+var _fog: FogOfWar
 var _run_state := RunState.PLAYING
 var _loot := 0
 var _credits := 0
@@ -69,6 +70,9 @@ func _ready() -> void:
 	_decorate()
 	_spawn_rivals()
 	_setup_camera()
+	_fog = FogOfWar.new()
+	_fog.setup(level, TILE_SIZE)
+	add_child(_fog)
 	_hud = Hud.new()
 	add_child(_hud)
 	_credits = SaveData.load_credits()
@@ -84,6 +88,7 @@ func _process(delta: float) -> void:
 		if _end_timer > END_SCREEN_DELAY and Input.is_action_just_pressed(&"interact"):
 			get_tree().change_scene_to_file(HUB_SCENE)
 			return
+	_update_vision(delta)
 	_update_beacon(delta)
 	relic.rotate_y(delta * 2.0)
 
@@ -152,7 +157,6 @@ func random_floor_position() -> Vector3:
 func on_rival_escaped(rival: Rival) -> void:
 	relic_carrier = null
 	_relic_lost = true
-	relic.visible = false
 	_hud.show_alert(
 		(
 			"%s s'est enfui avec la relique ! Sauve ton butin : trouve une sortie."
@@ -228,9 +232,20 @@ func _announce(text: String) -> void:
 		rival.on_relic_alert()
 
 
+## Les rivaux hors du champ de vision sont cachés, et la relique avec eux s'ils la portent.
+func _update_vision(delta: float) -> void:
+	_fog.update(delta, player.global_position, player.facing)
+	for rival in rivals:
+		rival.visible = _fog.is_in_view(rival.global_position)
+	relic.visible = (
+		not _relic_lost
+		and (relic_carrier == null or relic_carrier == player or relic_carrier.visible)
+	)
+
+
 func _update_beacon(delta: float) -> void:
 	_beacon_timer = maxf(_beacon_timer - delta, 0.0)
-	_beacon.visible = _beacon_timer > 0.0 and relic.visible
+	_beacon.visible = _beacon_timer > 0.0 and not _relic_lost
 	_beacon.global_position = Vector3(relic.global_position.x, 0.0, relic.global_position.z)
 
 
